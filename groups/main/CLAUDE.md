@@ -67,11 +67,33 @@ Main has access to the entire project:
 |----------------|-----------|--------|
 | `/workspace/project` | Project root | read-write |
 | `/workspace/group` | `groups/main/` | read-write |
+| `/workspace/extra/vault` | `~/Documents/Life` (Obsidian vault) | read-write |
 
 Key paths inside the container:
 - `/workspace/project/store/messages.db` - SQLite database
 - `/workspace/project/store/messages.db` (registered_groups table) - Group config
 - `/workspace/project/groups/` - All group folders
+
+---
+
+## Obsidian Vault
+
+Your Obsidian vault is mounted at `/workspace/extra/vault`. This is the user's live personal knowledge base — any files you create or edit appear in Obsidian instantly.
+
+**Default to the vault** for all personal content: notes, knowledge, research, health, jobs, trips, preferences. Only use `/workspace/group` for NanoClaw operational files (conversations, logs, scripts).
+
+Current vault structure:
+- `health/` — health & supplement tracking
+- `jobs/` — job search, applications, bio
+- `trips/` — travel plans and notes
+- `travel-preferences.md`
+- `lifeos/` — life OS project
+
+Guidelines:
+- Respect existing folder structure in the vault
+- Use Obsidian-compatible YAML frontmatter where useful (date, tags)
+- Use `[[wikilinks]]` to link between notes — Obsidian resolves them
+- Do NOT modify the `.obsidian/` directory (plugins, themes, settings)
 
 ---
 

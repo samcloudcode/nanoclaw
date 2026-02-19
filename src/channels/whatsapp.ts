@@ -17,6 +17,7 @@ import {
   updateChatName,
 } from '../db.js';
 import { logger } from '../logger.js';
+import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
 import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -86,10 +87,10 @@ export class WhatsAppChannel implements Channel {
 
         if (shouldReconnect) {
           logger.info('Reconnecting...');
-          this.connectInternal().catch((err) => {
+          this.connectInternal(onFirstOpen).catch((err) => {
             logger.error({ err }, 'Failed to reconnect, retrying in 5s');
             setTimeout(() => {
-              this.connectInternal().catch((err2) => {
+              this.connectInternal(onFirstOpen).catch((err2) => {
                 logger.error({ err: err2 }, 'Reconnection retry failed');
               });
             }, 5000);
@@ -164,12 +165,28 @@ export class WhatsAppChannel implements Channel {
         // Only deliver full message for registered groups
         const groups = this.opts.registeredGroups();
         if (groups[chatJid]) {
-          const content =
-            msg.message?.conversation ||
-            msg.message?.extendedTextMessage?.text ||
-            msg.message?.imageMessage?.caption ||
-            msg.message?.videoMessage?.caption ||
-            '';
+          // Debug: log message keys to diagnose empty content
+          logger.debug({ chatJid, messageKeys: Object.keys(msg.message || {}) }, 'Message type keys');
+
+          let content: string;
+          if (isVoiceMessage(msg)) {
+            try {
+              const transcript = await transcribeAudioMessage(msg, this.sock);
+              content = transcript ? `[Voice: ${transcript}]` : '[Voice Message - transcription unavailable]';
+              logger.info({ chatJid, length: content.length }, 'Transcribed voice message');
+            } catch (err) {
+              logger.error({ err }, 'Voice transcription error');
+              content = '[Voice Message - transcription failed]';
+            }
+          } else {
+            content =
+              msg.message?.conversation ||
+              msg.message?.extendedTextMessage?.text ||
+              msg.message?.imageMessage?.caption ||
+              msg.message?.videoMessage?.caption ||
+              '';
+          }
+
           const sender = msg.key.participant || msg.key.remoteJid || '';
           const senderName = msg.pushName || sender.split('@')[0];
 
