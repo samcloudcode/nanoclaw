@@ -8,8 +8,11 @@ import {
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
+  TELEGRAM_BOT_TOKEN,
+  TELEGRAM_ONLY,
   TRIGGER_PATTERN,
 } from './config.js';
+import { TelegramChannel } from './channels/telegram.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
@@ -461,9 +464,17 @@ async function main(): Promise<void> {
   };
 
   // Create and connect channels
-  whatsapp = new WhatsAppChannel(channelOpts);
-  channels.push(whatsapp);
-  await whatsapp.connect();
+  if (!TELEGRAM_ONLY) {
+    whatsapp = new WhatsAppChannel(channelOpts);
+    channels.push(whatsapp);
+    await whatsapp.connect();
+  }
+
+  if (TELEGRAM_BOT_TOKEN) {
+    const telegram = new TelegramChannel(TELEGRAM_BOT_TOKEN, channelOpts);
+    channels.push(telegram);
+    await telegram.connect();
+  }
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
@@ -492,6 +503,41 @@ async function main(): Promise<void> {
     syncGroupMetadata: (force) => whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
+    fetchOlderHistory: whatsapp
+      ? async (jid, anchorMsgId, anchorFromMe, anchorTimestampMs, count) => {
+          const waMessages = await whatsapp.fetchOlderHistory(jid, anchorMsgId, anchorFromMe, anchorTimestampMs, count);
+
+          // Convert WAMessage to simple format and store in DB
+          const results: Array<{ id: string; content: string; sender_name: string; timestamp: string; is_from_me: boolean }> = [];
+          for (const m of waMessages) {
+            const content =
+              m.message?.conversation ||
+              m.message?.extendedTextMessage?.text ||
+              m.message?.imageMessage?.caption ||
+              m.message?.videoMessage?.caption ||
+              '';
+            if (!content) continue;
+
+            const timestamp = new Date(Number(m.messageTimestamp) * 1000).toISOString();
+            const fromMe = m.key.fromMe || false;
+            const senderName = m.pushName || m.key.participant?.split('@')[0] || jid.split('@')[0];
+
+            const msg = {
+              id: m.key.id || `hist-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              chat_jid: jid,
+              sender: m.key.participant || jid,
+              sender_name: senderName,
+              content,
+              timestamp,
+              is_from_me: fromMe,
+              is_bot_message: false,
+            };
+            storeMessage(msg);
+            results.push({ id: msg.id, content, sender_name: senderName, timestamp, is_from_me: fromMe });
+          }
+          return results;
+        }
+      : undefined,
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();

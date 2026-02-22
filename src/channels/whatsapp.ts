@@ -5,8 +5,10 @@ import path from 'path';
 import makeWASocket, {
   Browsers,
   DisconnectReason,
+  WAMessage,
   WASocket,
   makeCacheableSignalKeyStore,
+  proto,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
 
@@ -87,6 +89,13 @@ export class WhatsAppChannel implements Channel {
 
         if (shouldReconnect) {
           logger.info('Reconnecting...');
+          // Clean up old socket to prevent memory leaks from accumulated
+          // caches (signal key store, internal buffers) across reconnections
+          try {
+            this.sock.ev.removeAllListeners('connection.update');
+            this.sock.ev.removeAllListeners('creds.update');
+            this.sock.ev.removeAllListeners('messages.upsert');
+          } catch { /* ignore */ }
           this.connectInternal(onFirstOpen).catch((err) => {
             logger.error({ err }, 'Failed to reconnect, retrying in 5s');
             setTimeout(() => {
@@ -162,21 +171,29 @@ export class WhatsAppChannel implements Channel {
         const isGroup = chatJid.endsWith('@g.us');
         this.opts.onChatMetadata(chatJid, timestamp, undefined, 'whatsapp', isGroup);
 
-        // Only deliver full message for registered groups
+        // Extract message content for registered groups and 1:1 chats
         const groups = this.opts.registeredGroups();
-        if (groups[chatJid]) {
+        const isRegistered = !!groups[chatJid];
+        const isPersonalChat = chatJid.endsWith('@s.whatsapp.net');
+
+        if (isRegistered || isPersonalChat) {
           // Debug: log message keys to diagnose empty content
           logger.debug({ chatJid, messageKeys: Object.keys(msg.message || {}) }, 'Message type keys');
 
           let content: string;
           if (isVoiceMessage(msg)) {
-            try {
-              const transcript = await transcribeAudioMessage(msg, this.sock);
-              content = transcript ? `[Voice: ${transcript}]` : '[Voice Message - transcription unavailable]';
-              logger.info({ chatJid, length: content.length }, 'Transcribed voice message');
-            } catch (err) {
-              logger.error({ err }, 'Voice transcription error');
-              content = '[Voice Message - transcription failed]';
+            // Only transcribe voice messages for registered groups (costs API calls)
+            if (isRegistered) {
+              try {
+                const transcript = await transcribeAudioMessage(msg, this.sock);
+                content = transcript ? `[Voice: ${transcript}]` : '[Voice Message - transcription unavailable]';
+                logger.info({ chatJid, length: content.length }, 'Transcribed voice message');
+              } catch (err) {
+                logger.error({ err }, 'Voice transcription error');
+                content = '[Voice Message - transcription failed]';
+              }
+            } else {
+              content = '[Voice Message]';
             }
           } else {
             content =
@@ -191,10 +208,6 @@ export class WhatsAppChannel implements Channel {
           const senderName = msg.pushName || sender.split('@')[0];
 
           const fromMe = msg.key.fromMe || false;
-          // Detect bot messages: with own number, fromMe is reliable
-          // since only the bot sends from that number.
-          // With shared number, bot messages carry the assistant name prefix
-          // (even in DMs/self-chat) so we check for that.
           const isBotMessage = ASSISTANT_HAS_OWN_NUMBER
             ? fromMe
             : content.startsWith(`${ASSISTANT_NAME}:`);
@@ -295,6 +308,79 @@ export class WhatsAppChannel implements Channel {
     } catch (err) {
       logger.error({ err }, 'Failed to sync group metadata');
     }
+  }
+
+  /**
+   * Fetch older message history from WhatsApp servers.
+   * Requires an anchor message (oldest known message for the chat).
+   * Returns messages older than the anchor.
+   */
+  async fetchOlderHistory(
+    jid: string,
+    anchorMsgId: string,
+    anchorFromMe: boolean,
+    anchorTimestampMs: number,
+    count: number,
+  ): Promise<WAMessage[]> {
+    if (!this.connected) {
+      throw new Error('Not connected to WhatsApp');
+    }
+
+    const TIMEOUT_MS = 30000;
+
+    return new Promise<WAMessage[]>((resolve) => {
+      let resolved = false;
+
+      const timer = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          this.sock.ev.off('messaging-history.set', handler);
+          logger.warn({ jid }, 'fetchOlderHistory timed out');
+          resolve([]);
+        }
+      }, TIMEOUT_MS);
+
+      const handler = (data: {
+        messages: WAMessage[];
+        syncType?: proto.HistorySync.HistorySyncType | null;
+      }) => {
+        // Only handle on-demand sync responses
+        if (data.syncType !== proto.HistorySync.HistorySyncType.ON_DEMAND) return;
+
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          this.sock.ev.off('messaging-history.set', handler);
+
+          // Filter to requested JID
+          const filtered = data.messages.filter(
+            (m) => m.key?.remoteJid === jid,
+          );
+          logger.info(
+            { jid, total: data.messages.length, filtered: filtered.length },
+            'Received on-demand history',
+          );
+          resolve(filtered);
+        }
+      };
+
+      this.sock.ev.on('messaging-history.set', handler);
+
+      // Send the request
+      this.sock.fetchMessageHistory(
+        count,
+        { remoteJid: jid, id: anchorMsgId, fromMe: anchorFromMe },
+        anchorTimestampMs,
+      ).catch((err) => {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          this.sock.ev.off('messaging-history.set', handler);
+          logger.error({ err, jid }, 'fetchMessageHistory failed');
+          resolve([]);
+        }
+      });
+    });
   }
 
   private async translateJid(jid: string): Promise<string> {

@@ -212,6 +212,22 @@ export function getAllChats(): ChatInfo[] {
 }
 
 /**
+ * Get personal (1:1) contacts that have stored messages.
+ */
+export function getPersonalContacts(): Array<{ jid: string; name: string; last_message_time: string; message_count: number }> {
+  return db
+    .prepare(
+      `SELECT c.jid, c.name, c.last_message_time, COUNT(m.id) as message_count
+       FROM chats c
+       JOIN messages m ON m.chat_jid = c.jid
+       WHERE c.jid LIKE '%@s.whatsapp.net'
+       GROUP BY c.jid
+       ORDER BY c.last_message_time DESC`,
+    )
+    .all() as Array<{ jid: string; name: string; last_message_time: string; message_count: number }>;
+}
+
+/**
  * Get timestamp of last group metadata sync.
  */
 export function getLastGroupSync(): string | null {
@@ -325,6 +341,47 @@ export function getMessagesSince(
   return db
     .prepare(sql)
     .all(chatJid, sinceTimestamp, `${botPrefix}:%`) as NewMessage[];
+}
+
+export function getOldestMessage(
+  chatJid: string,
+): { id: string; is_from_me: number; timestamp: string } | undefined {
+  return db
+    .prepare(
+      `SELECT id, is_from_me, timestamp
+       FROM messages
+       WHERE chat_jid = ?
+       ORDER BY timestamp ASC
+       LIMIT 1`,
+    )
+    .get(chatJid) as { id: string; is_from_me: number; timestamp: string } | undefined;
+}
+
+export function getMessagesForChat(
+  chatJid: string,
+  limit: number = 50,
+  query?: string,
+): Array<{ sender_name: string; content: string; timestamp: string; is_from_me: number }> {
+  if (query) {
+    return db
+      .prepare(
+        `SELECT sender_name, content, timestamp, is_from_me
+         FROM messages
+         WHERE chat_jid = ? AND content LIKE ?
+         ORDER BY timestamp DESC
+         LIMIT ?`,
+      )
+      .all(chatJid, `%${query}%`, limit) as Array<{ sender_name: string; content: string; timestamp: string; is_from_me: number }>;
+  }
+  return db
+    .prepare(
+      `SELECT sender_name, content, timestamp, is_from_me
+       FROM messages
+       WHERE chat_jid = ?
+       ORDER BY timestamp DESC
+       LIMIT ?`,
+    )
+    .all(chatJid, limit) as Array<{ sender_name: string; content: string; timestamp: string; is_from_me: number }>;
 }
 
 export function createTask(

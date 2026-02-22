@@ -17,7 +17,7 @@ Runs on **Linux (Fedora)**. Single Node.js process that connects to WhatsApp, ro
 | `src/config.ts` | Trigger pattern, paths, intervals |
 | `src/container-runner.ts` | Spawns agent containers with mounts |
 | `src/task-scheduler.ts` | Runs scheduled tasks |
-| `src/db.ts` | SQLite operations |
+| `src/db.ts` | SQLite operations (messages, chats, tasks) |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
 | `container/skills/` | Agent skills synced to all groups (see below) |
 

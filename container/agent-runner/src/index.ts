@@ -16,8 +16,12 @@
 
 import fs from 'fs';
 import path from 'path';
-import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
+import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput, PostToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
+import type { Span } from '@opentelemetry/api';
+
+// Logfire is optional — if LOGFIRE_TOKEN is not set, all tracing is a no-op
+let logfire: typeof import('@pydantic/logfire-node') | null = null;
 
 interface ContainerInput {
   prompt: string;
@@ -52,6 +56,58 @@ interface SDKUserMessage {
   message: { role: 'user'; content: string };
   parent_tool_use_id: null;
   session_id: string;
+}
+
+/**
+ * Initialize Logfire if LOGFIRE_TOKEN is available in secrets.
+ * Must be called before any spans are created.
+ */
+async function initLogfire(secrets: Record<string, string>): Promise<void> {
+  const token = secrets.LOGFIRE_TOKEN;
+  if (!token) return;
+
+  try {
+    logfire = await import('@pydantic/logfire-node');
+    const { DiagLogLevel } = logfire;
+    logfire.configure({
+      token,
+      serviceName: 'nanoclaw-agent',
+      console: true,
+      sendToLogfire: true,
+      diagLogLevel: DiagLogLevel.DEBUG,
+    });
+    log('Logfire initialized');
+  } catch (err) {
+    log(`Failed to initialize Logfire: ${err instanceof Error ? err.message : String(err)}`);
+    logfire = null;
+  }
+}
+
+// Track tool spans by toolUseId so PostToolUse can end them
+const toolSpans = new Map<string, Span>();
+
+function createToolSpanPreHook(parentSpan: Span): HookCallback {
+  return async (input, toolUseId) => {
+    if (!logfire || !toolUseId) return {};
+    const { tool_name } = input as PreToolUseHookInput;
+    const span = logfire.startSpan(`tool.${tool_name}`, {
+      'tool.name': tool_name,
+    }, { parentSpan });
+    toolSpans.set(toolUseId, span);
+    return {};
+  };
+}
+
+function createToolSpanPostHook(): HookCallback {
+  return async (input, toolUseId) => {
+    if (!toolUseId) return {};
+    const span = toolSpans.get(toolUseId);
+    if (span) {
+      span.end();
+      toolSpans.delete(toolUseId);
+    }
+    return {};
+  };
 }
 
 const IPC_INPUT_DIR = '/workspace/ipc/input';
@@ -360,6 +416,7 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
+  parentSpan?: Span,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
   stream.push(prompt);
@@ -450,7 +507,13 @@ async function runQuery(
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook()] }],
-        PreToolUse: [{ matcher: 'Bash', hooks: [createSanitizeBashHook()] }],
+        PreToolUse: [
+          { matcher: 'Bash', hooks: [createSanitizeBashHook()] },
+          ...(logfire && parentSpan ? [{ hooks: [createToolSpanPreHook(parentSpan)] }] : []),
+        ],
+        PostToolUse: [
+          ...(logfire ? [{ hooks: [createToolSpanPostHook()] }] : []),
+        ],
       },
     }
   })) {
@@ -476,6 +539,23 @@ async function runQuery(
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+
+      // Log result metrics to Logfire
+      if (logfire) {
+        const m = message as Record<string, unknown>;
+        logfire.info('agent.result', {
+          'result.subtype': message.subtype,
+          'result.cost_usd': m.total_cost_usd,
+          'result.duration_ms': m.duration_ms,
+          'result.duration_api_ms': m.duration_api_ms,
+          'result.num_turns': m.num_turns,
+          'result.input_tokens': (m.usage as Record<string, unknown>)?.input_tokens,
+          'result.output_tokens': (m.usage as Record<string, unknown>)?.output_tokens,
+          'result.cache_read_tokens': (m.usage as Record<string, unknown>)?.cache_read_input_tokens,
+          'result.cache_creation_tokens': (m.usage as Record<string, unknown>)?.cache_creation_input_tokens,
+        }, { parentSpan });
+      }
+
       writeOutput({
         status: 'success',
         result: textResult || null,
@@ -507,6 +587,9 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // Initialize Logfire before anything else (if token available)
+  await initLogfire(containerInput.secrets || {});
+
   // Build SDK env: merge secrets into process.env for the SDK only.
   // Secrets never touch process.env itself, so Bash subprocesses can't see them.
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
@@ -535,12 +618,29 @@ async function main(): Promise<void> {
   }
 
   // Query loop: run query → wait for IPC message → run new query → repeat
+  const sessionSpan = logfire?.startSpan('agent.session', {
+    'session.group': containerInput.groupFolder,
+    'session.chat_jid': containerInput.chatJid,
+    'session.is_main': containerInput.isMain,
+    'session.is_scheduled': containerInput.isScheduledTask ?? false,
+  });
+
   let resumeAt: string | undefined;
+  let queryCount = 0;
   try {
     while (true) {
+      queryCount++;
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      const querySpan = logfire?.startSpan('agent.query', {
+        'query.number': queryCount,
+        'query.prompt_length': prompt.length,
+        'query.session_id': sessionId ?? 'new',
+      }, { parentSpan: sessionSpan });
+
+      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt, querySpan);
+      querySpan?.end();
+
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
@@ -574,14 +674,20 @@ async function main(): Promise<void> {
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     log(`Agent error: ${errorMessage}`);
+    sessionSpan?.setAttribute('error', true);
+    sessionSpan?.setAttribute('error.message', errorMessage);
     writeOutput({
       status: 'error',
       result: null,
       newSessionId: sessionId,
       error: errorMessage
     });
+    sessionSpan?.end();
     process.exit(1);
   }
+
+  sessionSpan?.setAttribute('session.query_count', queryCount);
+  sessionSpan?.end();
 }
 
 main();

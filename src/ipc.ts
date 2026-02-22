@@ -10,7 +10,7 @@ import {
   TIMEZONE,
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import { createTask, deleteTask, getMessagesForChat, getOldestMessage, getPersonalContacts, getTaskById, updateTask } from './db.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
@@ -26,6 +26,13 @@ export interface IpcDeps {
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
+  fetchOlderHistory?: (
+    jid: string,
+    anchorMsgId: string,
+    anchorFromMe: boolean,
+    anchorTimestampMs: number,
+    count: number,
+  ) => Promise<Array<{ id: string; content: string; sender_name: string; timestamp: string; is_from_me: boolean }>>;
 }
 
 let ipcWatcherRunning = false;
@@ -169,6 +176,11 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For fetch_chat / fetch_history
+    requestId?: string;
+    limit?: number;
+    query?: string;
+    count?: number;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -372,6 +384,93 @@ export async function processTaskIpc(
         );
       }
       break;
+
+    case 'fetch_chat':
+    case 'list_contacts': {
+      if (!data.requestId) break;
+
+      let responseData: object;
+      if (data.type === 'fetch_chat' && data.jid) {
+        const messages = getMessagesForChat(
+          data.jid,
+          data.limit || 50,
+          data.query,
+        );
+        responseData = { messages };
+        logger.info(
+          { requestId: data.requestId, jid: data.jid, count: messages.length, sourceGroup },
+          'Chat history fetched via IPC',
+        );
+      } else if (data.type === 'list_contacts') {
+        const contacts = getPersonalContacts();
+        responseData = { contacts };
+        logger.info(
+          { requestId: data.requestId, count: contacts.length, sourceGroup },
+          'Contacts listed via IPC',
+        );
+      } else {
+        break;
+      }
+
+      // Write response to the source group's responses directory
+      const responsesDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'responses');
+      fs.mkdirSync(responsesDir, { recursive: true });
+      const responsePath = path.join(responsesDir, `${data.requestId}.json`);
+      const tempPath = `${responsePath}.tmp`;
+      fs.writeFileSync(tempPath, JSON.stringify(responseData, null, 2));
+      fs.renameSync(tempPath, responsePath);
+      break;
+    }
+
+    case 'fetch_history': {
+      if (!data.requestId || !data.jid) break;
+
+      const writeResponse = (responsesDir: string, reqId: string, payload: object) => {
+        fs.mkdirSync(responsesDir, { recursive: true });
+        const rp = path.join(responsesDir, `${reqId}.json`);
+        const tp = `${rp}.tmp`;
+        fs.writeFileSync(tp, JSON.stringify(payload, null, 2));
+        fs.renameSync(tp, rp);
+      };
+
+      const respDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'responses');
+
+      if (!deps.fetchOlderHistory) {
+        writeResponse(respDir, data.requestId, { error: 'WhatsApp channel not available' });
+        break;
+      }
+
+      const anchor = getOldestMessage(data.jid);
+      if (!anchor) {
+        writeResponse(respDir, data.requestId, {
+          error: 'No stored messages for this contact. Need at least one message to use as anchor.',
+        });
+        break;
+      }
+
+      const anchorTimestampMs = new Date(anchor.timestamp).getTime();
+
+      try {
+        const messages = await deps.fetchOlderHistory(
+          data.jid,
+          anchor.id,
+          !!anchor.is_from_me,
+          anchorTimestampMs,
+          data.count || 50,
+        );
+        writeResponse(respDir, data.requestId, { messages, count: messages.length });
+        logger.info(
+          { requestId: data.requestId, jid: data.jid, count: messages.length, sourceGroup },
+          'Older history fetched via IPC',
+        );
+      } catch (err) {
+        writeResponse(respDir, data.requestId, {
+          error: `Failed to fetch history: ${err instanceof Error ? err.message : String(err)}`,
+        });
+        logger.error({ err, jid: data.jid, sourceGroup }, 'fetch_history failed');
+      }
+      break;
+    }
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');

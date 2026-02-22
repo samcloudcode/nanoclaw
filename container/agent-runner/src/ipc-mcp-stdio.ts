@@ -14,11 +14,45 @@ import { CronExpressionParser } from 'cron-parser';
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
+const RESPONSES_DIR = path.join(IPC_DIR, 'responses');
 
 // Context from environment variables (set by the agent runner)
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
+
+/**
+ * Send an IPC request and poll for a response file from the host.
+ * Returns the parsed JSON response, or null on timeout.
+ */
+async function ipcRequest(data: object, timeoutMs = 10000): Promise<any | null> {
+  const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  writeIpcFile(TASKS_DIR, { ...data, requestId });
+
+  const responsePath = path.join(RESPONSES_DIR, `${requestId}.json`);
+  const POLL_MS = 200;
+  const start = Date.now();
+
+  while (Date.now() - start < timeoutMs) {
+    if (fs.existsSync(responsePath)) {
+      try {
+        const result = JSON.parse(fs.readFileSync(responsePath, 'utf-8'));
+        fs.unlinkSync(responsePath);
+        return result;
+      } catch {
+        // File exists but unreadable — wait for atomic rename to complete
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+  }
+
+  // Schedule cleanup for late-arriving responses
+  setTimeout(() => {
+    try { if (fs.existsSync(responsePath)) fs.unlinkSync(responsePath); } catch { /* ignore */ }
+  }, 5000);
+
+  return null;
+}
 
 function writeIpcFile(dir: string, data: object): string {
   fs.mkdirSync(dir, { recursive: true });
@@ -271,6 +305,113 @@ Use available_groups.json to find the JID for a group. The folder name should be
     return {
       content: [{ type: 'text' as const, text: `Group "${args.name}" registered. It will start receiving messages immediately.` }],
     };
+  },
+);
+
+server.tool(
+  'list_contacts',
+  'List WhatsApp contacts that have stored message history. Returns contact names, JIDs, and message counts. Use this to discover JIDs before querying chat history with query_chat.',
+  {},
+  async () => {
+    const result = await ipcRequest({ type: 'list_contacts' });
+
+    if (!result) {
+      return { content: [{ type: 'text' as const, text: 'Timed out waiting for contacts list.' }], isError: true };
+    }
+
+    if (!result.contacts || result.contacts.length === 0) {
+      return { content: [{ type: 'text' as const, text: 'No contacts with stored messages found.' }] };
+    }
+
+    const formatted = result.contacts
+      .map((c: { name: string; jid: string; message_count: number; last_message_time: string }) =>
+        `- ${c.name} (${c.jid}) — ${c.message_count} messages, last: ${new Date(c.last_message_time).toLocaleString()}`,
+      )
+      .join('\n');
+
+    return { content: [{ type: 'text' as const, text: `Contacts with message history:\n\n${formatted}` }] };
+  },
+);
+
+server.tool(
+  'query_chat',
+  `Query WhatsApp chat history for a 1:1 personal contact. Returns recent messages from the conversation.
+
+Use list_contacts first to find the JID. You can optionally search for specific keywords.
+
+Messages are returned in chronological order (oldest first).`,
+  {
+    jid: z.string().describe('The WhatsApp JID (e.g., "1234567890@s.whatsapp.net")'),
+    limit: z.number().default(50).describe('Maximum number of messages to return (default 50)'),
+    query: z.string().optional().describe('Optional keyword to search for in message content'),
+  },
+  async (args) => {
+    const result = await ipcRequest({
+      type: 'fetch_chat',
+      jid: args.jid,
+      limit: args.limit || 50,
+      query: args.query,
+    });
+
+    if (!result) {
+      return { content: [{ type: 'text' as const, text: 'Timed out waiting for chat history response from host.' }], isError: true };
+    }
+
+    if (!result.messages || result.messages.length === 0) {
+      return { content: [{ type: 'text' as const, text: `No messages found for ${args.jid}${args.query ? ` matching "${args.query}"` : ''}.` }] };
+    }
+
+    const formatted = result.messages
+      .map((m: { sender_name: string; content: string; timestamp: string; is_from_me: number }) => {
+        const time = new Date(m.timestamp).toLocaleString();
+        const who = m.is_from_me ? 'You' : m.sender_name;
+        return `[${time}] ${who}: ${m.content}`;
+      })
+      .reverse()
+      .join('\n');
+
+    return { content: [{ type: 'text' as const, text: `Chat history (${result.messages.length} messages):\n\n${formatted}` }] };
+  },
+);
+
+server.tool(
+  'fetch_history',
+  `Fetch older WhatsApp message history from the server for a 1:1 contact. This pulls messages that were sent BEFORE NanoClaw started storing them.
+
+Requires at least one stored message for the contact (as an anchor point). Use list_contacts to check. The fetched messages are stored permanently, so subsequent query_chat calls will include them.
+
+This operation can take up to 30 seconds as it requests data from WhatsApp's servers.`,
+  {
+    jid: z.string().describe('The WhatsApp JID (e.g., "1234567890@s.whatsapp.net")'),
+    count: z.number().default(50).describe('Number of older messages to fetch (default 50)'),
+  },
+  async (args) => {
+    const result = await ipcRequest(
+      { type: 'fetch_history', jid: args.jid, count: args.count || 50 },
+      35000,
+    );
+
+    if (!result) {
+      return { content: [{ type: 'text' as const, text: 'Timed out waiting for history fetch.' }], isError: true };
+    }
+
+    if (result.error) {
+      return { content: [{ type: 'text' as const, text: result.error }], isError: true };
+    }
+
+    if (!result.messages || result.messages.length === 0) {
+      return { content: [{ type: 'text' as const, text: `No older messages found for ${args.jid}. The contact may not have older history available.` }] };
+    }
+
+    const formatted = result.messages
+      .map((m: { sender_name: string; content: string; timestamp: string; is_from_me: boolean }) => {
+        const time = new Date(m.timestamp).toLocaleString();
+        const who = m.is_from_me ? 'You' : m.sender_name;
+        return `[${time}] ${who}: ${m.content}`;
+      })
+      .join('\n');
+
+    return { content: [{ type: 'text' as const, text: `Fetched ${result.messages.length} older messages (now stored for future queries):\n\n${formatted}` }] };
   },
 );
 

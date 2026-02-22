@@ -42,31 +42,75 @@ async function transcribeWithOpenAI(
     return null;
   }
 
-  try {
-    const openaiModule = await import('openai');
-    const OpenAI = openaiModule.default;
-    const toFile = openaiModule.toFile;
+  const maxRetries = 3;
+  const openaiModule = await import('openai');
+  const OpenAI = openaiModule.default;
+  const toFile = openaiModule.toFile;
 
-    const openai = new OpenAI({
-      apiKey: config.openai.apiKey,
-    });
+  const openai = new OpenAI({
+    apiKey: config.openai.apiKey,
+  });
 
-    const file = await toFile(audioBuffer, 'voice.ogg', {
-      type: 'audio/ogg',
-    });
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const file = await toFile(audioBuffer, 'voice.ogg', {
+        type: 'audio/ogg',
+      });
 
-    const transcription = await openai.audio.transcriptions.create({
-      file: file,
-      model: config.openai.model || 'whisper-1',
-      response_format: 'text',
-    });
+      const transcription = await openai.audio.transcriptions.create({
+        file: file,
+        model: config.openai.model || 'whisper-1',
+        response_format: 'text',
+      });
 
-    // When response_format is 'text', the API returns a plain string
-    return transcription as unknown as string;
-  } catch (err) {
-    console.error('OpenAI transcription failed:', err);
-    return null;
+      // When response_format is 'text', the API returns a plain string
+      return transcription as unknown as string;
+    } catch (err) {
+      const isNetworkError = err instanceof TypeError && (err as any).message?.includes('fetch failed');
+      const label = isNetworkError ? 'Network error' : 'API error';
+      if (attempt < maxRetries) {
+        const delay = attempt * 1000;
+        console.warn(`OpenAI transcription ${label} (attempt ${attempt}/${maxRetries}), retrying in ${delay}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      } else {
+        console.error(`OpenAI transcription failed after ${maxRetries} attempts (${label}):`, err);
+        return null;
+      }
+    }
   }
+
+  return null;
+}
+
+/**
+ * Transcribe an audio buffer using the configured provider.
+ * Channel-agnostic — works with any audio source.
+ */
+export async function transcribeBuffer(
+  audioBuffer: Buffer,
+): Promise<string | null> {
+  const config = loadConfig();
+
+  if (!config.enabled) {
+    return config.fallbackMessage;
+  }
+
+  if (!audioBuffer || audioBuffer.length === 0) {
+    return config.fallbackMessage;
+  }
+
+  let transcript: string | null = null;
+
+  switch (config.provider) {
+    case 'openai':
+      transcript = await transcribeWithOpenAI(audioBuffer, config);
+      break;
+    default:
+      console.error(`Unknown transcription provider: ${config.provider}`);
+      return config.fallbackMessage;
+  }
+
+  return transcript ? transcript.trim() : config.fallbackMessage;
 }
 
 export async function transcribeAudioMessage(
