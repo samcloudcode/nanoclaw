@@ -13,8 +13,8 @@
     "@modelcontextprotocol/sdk": "^1.12.1",
     "cron-parser": "^5.0.0",
     "zod": "^4.0.0",
-    "@pydantic/logfire-node": "^0.13.0",
-    "imapflow": "^1.0.169"
+    "imapflow": "^1.0.169",
+    "mailparser": "^3.7.2"
   },
   "devDependencies": {
     "@types/node": "^22.10.7",

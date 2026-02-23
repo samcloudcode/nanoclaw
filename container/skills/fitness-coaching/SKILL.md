@@ -10,7 +10,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash(node:*)
 - Manages fitness data (programs, workouts, knowledge, metrics) via markdown files
 - Provides a query script for context loading and progress tracking
 - Tracks 4-level hierarchy: Goals (LifeOS) → Program → Week → Plan
-- Integrates with LifeOS for goal management (Energy life area)
+- Integrates with LifeOS for goal management (tagged with `fitness` label)
 
 **This file contains:**
 - File layout and data model
@@ -34,7 +34,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash(node:*)
 All paths below are relative to this directory. Use the full path when calling Read/Write tools.
 
 **Core Approach**: Track fitness data at 4 hierarchical planning levels:
-1. **Goals** - Long-term targets in LifeOS (Energy life area via `/lifeos-db` skill)
+1. **Goals** - Long-term targets in LifeOS (tagged with `fitness` label, via `/lifeos-db` skill)
 2. **Program** - Overall strategy (`fitness/program.md`)
 3. **Week** - This week's schedule (`fitness/weeks/YYYY-week-NN.md`)
 4. **Plan** - Today's workout (`fitness/plans/YYYY-MM-DD-type.md`)
@@ -65,7 +65,7 @@ All paths below are relative to this directory. Use the full path when calling R
 **New goals mentioned:**
 ```
 User: "I want to bench 225 by June"
-→ Create in LifeOS via /lifeos-db skill (Energy life area, goal_type='standard')
+→ Create in LifeOS via /lifeos-db skill (Energy life area + `fitness` label, goal_type='standard')
 → Also note in fitness/knowledge.md if it affects programming
 ```
 
@@ -275,10 +275,19 @@ Move content to an `## Archived` section at the bottom of the file. For dated fi
 
 ## Goals Integration with LifeOS
 
-Fitness goals live in LifeOS as goals tagged with the **Energy** life area. Use the `/lifeos-db` skill to create/query/update fitness goals.
+Fitness goals live in LifeOS as goals tagged with the **`fitness` label**. Use the `/lifeos-db` skill to create/query/update fitness goals.
+
+**Querying fitness goals:**
+```sql
+SELECT g.id, g.title, g.priority, g.goal_type FROM goal g
+JOIN entity_tag et ON g.id::text = et.entity_id::text AND et.entity_type = 'goal' AND et.deleted_at IS NULL
+JOIN lifeos_tag lt ON et.tag_id = lt.id AND lt.value = 'fitness' AND lt.is_system = FALSE
+WHERE g.user_id = '$USER_ID' AND g.status = 'active' AND g.deleted_at IS NULL
+ORDER BY g.priority DESC;
+```
 
 **Creating a fitness goal:**
-Use lifeos-db to INSERT INTO goal with life_area tag = 'Energy'.
+Use lifeos-db to INSERT INTO goal with Energy life area tag AND the `fitness` label tag. Parent goal: "Maintain excellent health, energy, strength, mobility".
 
 **Referencing goals in fitness files:**
 Use the goal title as a reference in program.md, plans, and logs (e.g., "squat-315 p1" or "sub-20-5k p2").
@@ -398,4 +407,4 @@ Old data no longer relevant → Move to Archived section
 - Single files (knowledge, preferences, program) = read, modify, write complete file
 - Your ideas = propose first, save after approval
 - User's info = save immediately
-- Goals live in LifeOS (Energy life area)
+- Goals live in LifeOS (tagged with `fitness` label)

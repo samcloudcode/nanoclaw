@@ -21,8 +21,10 @@ RUN apt-get update && apt-get install -y \
     libcups2 \
     libdrm2 \
     libxshmfence1 \
+    postgresql-client \
     curl \
     git \
+    jq \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Chromium path for agent-browser

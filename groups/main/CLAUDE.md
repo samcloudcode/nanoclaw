@@ -229,6 +229,22 @@ You can read and write to `/workspace/project/groups/global/CLAUDE.md` for facts
 
 ---
 
+## Life OS Calendar & Planning
+
+- Use the `lifeos-db` skill for goals, tasks, and calendar events
+- **Default timezone**: Asia/Hong_Kong (HKT, UTC+8)
+- **Travel timezone**: Adjust based on trip context (check vault `/trips/` folder)
+
+### Date Verification Protocol
+
+**CRITICAL**: When user provides relative day names ("Wednesday", "next Tuesday"), ALWAYS confirm the exact date before creating the event.
+
+Example: *"Just to confirm - Wednesday Feb 25 (in 3 days)?"* then wait for confirmation.
+
+Exception: Explicit dates ("Feb 25 at 7pm") don't need verification.
+
+---
+
 ## Scheduling for Other Groups
 
 When scheduling tasks for other groups, use the `target_group_jid` parameter with the group's JID from `registered_groups.json`:

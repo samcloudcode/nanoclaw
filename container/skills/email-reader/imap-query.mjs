@@ -14,18 +14,40 @@
  * Environment:
  *   PROTON_EMAIL    — ProtonBridge login email
  *   PROTON_PASSWORD — ProtonBridge per-client password
- *   IMAP_HOST       — Override host (default: host.docker.internal)
+ *   IMAP_HOST       — Override host (default: 127.0.0.1)
  *   IMAP_PORT       — Override port (default: 1143)
  */
 
 import { createRequire } from 'node:module';
 const require = createRequire('/app/package.json');
 const { ImapFlow } = require('imapflow');
+const { simpleParser } = require('mailparser');
 
-const EMAIL = process.env.PROTON_EMAIL;
-const PASSWORD = process.env.PROTON_PASSWORD;
-const HOST = process.env.IMAP_HOST || '127.0.0.1';
-const PORT = parseInt(process.env.IMAP_PORT || '1143', 10);
+// Read credentials from the original process environment only.
+// Reject inline env var overrides by comparing against /proc/self/environ.
+import { readFileSync } from 'node:fs';
+const _origEnv = {};
+try {
+  const raw = readFileSync('/proc/self/environ', 'utf-8');
+  for (const entry of raw.split('\0')) {
+    const eq = entry.indexOf('=');
+    if (eq > 0) _origEnv[entry.slice(0, eq)] = entry.slice(eq + 1);
+  }
+} catch { /* non-Linux fallback: trust process.env */ }
+function _safeEnv(key) {
+  const orig = _origEnv[key];
+  const current = process.env[key];
+  if (orig !== undefined && current !== orig) {
+    console.error(`Error: ${key} was overridden. This is not allowed.`);
+    process.exit(1);
+  }
+  return current;
+}
+
+const EMAIL = _safeEnv('PROTON_EMAIL');
+const PASSWORD = _safeEnv('PROTON_PASSWORD');
+const HOST = _safeEnv('IMAP_HOST') || '127.0.0.1';
+const PORT = parseInt(_safeEnv('IMAP_PORT') || '1143', 10);
 
 // --- Helpers ---
 
@@ -110,40 +132,15 @@ async function withClient(fn) {
 }
 
 async function getBodyText(client, uid) {
-  // Try text/plain first, fall back to text/html
-  let content = '';
   try {
-    const { content: stream } = await client.download(uid + '', { uid: true });
-    const chunks = [];
-    for await (const chunk of stream) chunks.push(chunk);
-    const raw = Buffer.concat(chunks).toString('utf-8');
+    const msg = await client.fetchOne(String(uid), { source: true }, { uid: true });
+    if (!msg?.source) return '(could not retrieve message body)';
 
-    // Extract text/plain from the raw message
-    // imapflow's download gives us the full RFC822 message
-    const plainMatch = raw.match(/Content-Type:\s*text\/plain[^\r\n]*\r?\n(?:Content-Transfer-Encoding:[^\r\n]*\r?\n)?(?:[^\r\n]+:[^\r\n]*\r?\n)*\r?\n([\s\S]*?)(?:\r?\n--|\r?\n\.\r?\n|$)/i);
-    const htmlMatch = raw.match(/Content-Type:\s*text\/html[^\r\n]*\r?\n(?:Content-Transfer-Encoding:[^\r\n]*\r?\n)?(?:[^\r\n]+:[^\r\n]*\r?\n)*\r?\n([\s\S]*?)(?:\r?\n--|\r?\n\.\r?\n|$)/i);
-
-    if (plainMatch) {
-      content = plainMatch[1].trim();
-    } else if (htmlMatch) {
-      content = stripHtml(htmlMatch[1].trim());
-    } else {
-      // Simple message without MIME boundaries — body is everything after first blank line
-      const bodyStart = raw.indexOf('\r\n\r\n');
-      if (bodyStart !== -1) {
-        const body = raw.slice(bodyStart + 4);
-        // Check if it looks like HTML
-        if (body.includes('<html') || body.includes('<body') || body.includes('<div')) {
-          content = stripHtml(body);
-        } else {
-          content = body.trim();
-        }
-      }
-    }
+    const parsed = await simpleParser(msg.source);
+    return parsed.text || (parsed.html ? stripHtml(parsed.html) : '') || '';
   } catch {
-    content = '(could not retrieve message body)';
+    return '(could not retrieve message body)';
   }
-  return content;
 }
 
 // --- Commands ---
@@ -163,12 +160,12 @@ async function cmdList(opts) {
 
       const start = Math.max(1, total - last + 1);
       const range = `${start}:${total}`;
-      const messages = [];
 
+      // Collect metadata first — exhaust the fetch generator before any other IMAP calls
+      const messages = [];
       for await (const msg of client.fetch(range, {
         uid: true,
         envelope: true,
-        bodyStructure: true,
       })) {
         messages.push(msg);
       }
@@ -177,12 +174,13 @@ async function cmdList(opts) {
       messages.reverse();
 
       console.log(`## ${folder} — ${messages.length} of ${total} messages\n`);
+
+      // Now fetch bodies separately (safe — fetch generator is exhausted)
       for (const msg of messages) {
         const from = formatAddress(msg.envelope.from);
         const subject = msg.envelope.subject || '(no subject)';
         const date = formatDate(msg.envelope.date);
 
-        // Get snippet
         const body = await getBodyText(client, msg.uid);
         const snippet = truncateWords(body, 25);
 
@@ -213,10 +211,10 @@ async function cmdRead(opts) {
     try {
       let msg;
       try {
-        msg = await client.fetchOne(uid, {
+        msg = await client.fetchOne(String(uid), {
           uid: true,
           envelope: true,
-          headers: true,
+          source: true,
         }, { uid: true });
       } catch {
         console.error(`Error: Message UID ${uid} not found in ${folder}.`);
@@ -230,18 +228,18 @@ async function cmdRead(opts) {
       console.log(`**Subject:** ${env.subject || '(no subject)'}`);
       console.log(`**Date:** ${formatDate(env.date)}`);
 
-      // Threading headers
-      const headers = msg.headers?.toString() || '';
-      const messageId = headers.match(/^Message-ID:\s*(.+)$/mi)?.[1]?.trim();
-      const inReplyTo = headers.match(/^In-Reply-To:\s*(.+)$/mi)?.[1]?.trim();
-      const references = headers.match(/^References:\s*(.+)$/mi)?.[1]?.trim();
+      // Threading headers from parsed message
+      const parsed = await simpleParser(msg.source);
+      const messageId = parsed.messageId;
+      const inReplyTo = parsed.inReplyTo;
+      const references = parsed.references;
       if (messageId) console.log(`**Message-ID:** ${messageId}`);
       if (inReplyTo) console.log(`**In-Reply-To:** ${inReplyTo}`);
-      if (references) console.log(`**References:** ${references}`);
+      if (references) console.log(`**References:** ${Array.isArray(references) ? references.join(' ') : references}`);
 
       console.log('\n---\n');
 
-      const body = await getBodyText(client, uid);
+      const body = parsed.text || (parsed.html ? stripHtml(parsed.html) : '(no body)');
       console.log(truncateChars(body, 4000));
     } finally {
       lock.release();
@@ -276,7 +274,7 @@ async function cmdSearch(opts) {
       for (const uid of selected) {
         let msg;
         try {
-          msg = await client.fetchOne(uid, { uid: true, envelope: true }, { uid: true });
+          msg = await client.fetchOne(String(uid), { uid: true, envelope: true }, { uid: true });
         } catch { continue; }
 
         const from = formatAddress(msg.envelope.from);

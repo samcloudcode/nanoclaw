@@ -16,12 +16,8 @@
 
 import fs from 'fs';
 import path from 'path';
-import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput, PostToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
+import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput, PostToolUseHookInput, PostToolUseFailureHookInput, SubagentStartHookInput, SubagentStopHookInput, TaskCompletedHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
-import type { Span } from '@opentelemetry/api';
-
-// Logfire is optional — if LOGFIRE_TOKEN is not set, all tracing is a no-op
-let logfire: typeof import('@pydantic/logfire-node') | null = null;
 
 interface ContainerInput {
   prompt: string;
@@ -58,56 +54,127 @@ interface SDKUserMessage {
   session_id: string;
 }
 
+const TRACE_DIR = '/workspace/group/traces';
+const MAX_INPUT_LEN = 500;
+const MAX_OUTPUT_LEN = 1000;
+
+function truncate(value: unknown, maxLen: number): unknown {
+  if (value == null) return value;
+  const s = typeof value === 'string' ? value : JSON.stringify(value);
+  if (s.length <= maxLen) return value;
+  return `${s.slice(0, maxLen)}… [truncated ${s.length} chars]`;
+}
+
 /**
- * Initialize Logfire if LOGFIRE_TOKEN is available in secrets.
- * Must be called before any spans are created.
+ * Writes JSONL trace events to groups/{group}/traces/.
+ * Each line is a timestamped event capturing tool calls, results, and errors.
  */
-async function initLogfire(secrets: Record<string, string>): Promise<void> {
-  const token = secrets.LOGFIRE_TOKEN;
-  if (!token) return;
+class SessionTracer {
+  private fd: number;
+  private toolTimers = new Map<string, number>();
 
-  try {
-    logfire = await import('@pydantic/logfire-node');
-    const { DiagLogLevel } = logfire;
-    logfire.configure({
-      token,
-      serviceName: 'nanoclaw-agent',
-      console: true,
-      sendToLogfire: true,
-      diagLogLevel: DiagLogLevel.DEBUG,
-    });
-    log('Logfire initialized');
-  } catch (err) {
-    log(`Failed to initialize Logfire: ${err instanceof Error ? err.message : String(err)}`);
-    logfire = null;
+  constructor(sessionId?: string) {
+    fs.mkdirSync(TRACE_DIR, { recursive: true });
+    const now = new Date();
+    const date = now.toISOString().slice(0, 10);
+    const time = now.toISOString().slice(11, 16).replace(':', '-');
+    const prefix = sessionId ? sessionId.slice(0, 8) : 'new';
+    const filename = `${date}-${time}-${prefix}.jsonl`;
+    this.fd = fs.openSync(path.join(TRACE_DIR, filename), 'a');
   }
-}
 
-// Track tool spans by toolUseId so PostToolUse can end them
-const toolSpans = new Map<string, Span>();
+  write(event: Record<string, unknown>): void {
+    const line = JSON.stringify({ ts: new Date().toISOString(), ...event });
+    fs.writeSync(this.fd, line + '\n');
+  }
 
-function createToolSpanPreHook(parentSpan: Span): HookCallback {
-  return async (input, toolUseId) => {
-    if (!logfire || !toolUseId) return {};
-    const { tool_name } = input as PreToolUseHookInput;
-    const span = logfire.startSpan(`tool.${tool_name}`, {
-      'tool.name': tool_name,
-    }, { parentSpan });
-    toolSpans.set(toolUseId, span);
-    return {};
-  };
-}
+  close(): void {
+    fs.closeSync(this.fd);
+  }
 
-function createToolSpanPostHook(): HookCallback {
-  return async (input, toolUseId) => {
-    if (!toolUseId) return {};
-    const span = toolSpans.get(toolUseId);
-    if (span) {
-      span.end();
-      toolSpans.delete(toolUseId);
-    }
-    return {};
-  };
+  createPreToolHook(): HookCallback {
+    return async (input, toolUseId) => {
+      if (toolUseId) {
+        this.toolTimers.set(toolUseId, Date.now());
+      }
+      return {};
+    };
+  }
+
+  createPostToolHook(): HookCallback {
+    return async (input, toolUseId) => {
+      const post = input as PostToolUseHookInput;
+      const startTime = toolUseId ? this.toolTimers.get(toolUseId) : undefined;
+      const durationMs = startTime ? Date.now() - startTime : undefined;
+      if (toolUseId) this.toolTimers.delete(toolUseId);
+      this.write({
+        event: 'tool.call',
+        tool: post.tool_name,
+        toolUseId,
+        input: truncate(post.tool_input, MAX_INPUT_LEN),
+        output: truncate(post.tool_response, MAX_OUTPUT_LEN),
+        durationMs,
+      });
+      return {};
+    };
+  }
+
+  createPostToolFailureHook(): HookCallback {
+    return async (input, toolUseId) => {
+      const fail = input as PostToolUseFailureHookInput;
+      const startTime = toolUseId ? this.toolTimers.get(toolUseId) : undefined;
+      const durationMs = startTime ? Date.now() - startTime : undefined;
+      if (toolUseId) this.toolTimers.delete(toolUseId);
+      this.write({
+        event: 'tool.error',
+        tool: fail.tool_name,
+        toolUseId,
+        input: truncate(fail.tool_input, MAX_INPUT_LEN),
+        error: (fail as unknown as { error: string }).error,
+        durationMs,
+      });
+      return {};
+    };
+  }
+
+  createSubagentStartHook(): HookCallback {
+    return async (input) => {
+      const sa = input as SubagentStartHookInput;
+      this.write({
+        event: 'subagent.start',
+        agentId: sa.agent_id,
+        agentType: sa.agent_type,
+      });
+      return {};
+    };
+  }
+
+  createSubagentStopHook(): HookCallback {
+    return async (input) => {
+      const sa = input as SubagentStopHookInput;
+      this.write({
+        event: 'subagent.stop',
+        agentId: sa.agent_id,
+        agentType: sa.agent_type,
+      });
+      return {};
+    };
+  }
+
+  createTaskCompletedHook(): HookCallback {
+    return async (input) => {
+      const tc = input as TaskCompletedHookInput;
+      this.write({
+        event: 'task.completed',
+        taskId: tc.task_id,
+        subject: tc.task_subject,
+        description: tc.task_description,
+        teammateName: tc.teammate_name,
+        teamName: tc.team_name,
+      });
+      return {};
+    };
+  }
 }
 
 const IPC_INPUT_DIR = '/workspace/ipc/input';
@@ -416,7 +483,7 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
-  parentSpan?: Span,
+  tracer?: SessionTracer,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
   stream.push(prompt);
@@ -509,10 +576,22 @@ async function runQuery(
         PreCompact: [{ hooks: [createPreCompactHook()] }],
         PreToolUse: [
           { matcher: 'Bash', hooks: [createSanitizeBashHook()] },
-          ...(logfire && parentSpan ? [{ hooks: [createToolSpanPreHook(parentSpan)] }] : []),
+          ...(tracer ? [{ hooks: [tracer.createPreToolHook()] }] : []),
         ],
         PostToolUse: [
-          ...(logfire ? [{ hooks: [createToolSpanPostHook()] }] : []),
+          ...(tracer ? [{ hooks: [tracer.createPostToolHook()] }] : []),
+        ],
+        PostToolUseFailure: [
+          ...(tracer ? [{ hooks: [tracer.createPostToolFailureHook()] }] : []),
+        ],
+        SubagentStart: [
+          ...(tracer ? [{ hooks: [tracer.createSubagentStartHook()] }] : []),
+        ],
+        SubagentStop: [
+          ...(tracer ? [{ hooks: [tracer.createSubagentStopHook()] }] : []),
+        ],
+        TaskCompleted: [
+          ...(tracer ? [{ hooks: [tracer.createTaskCompletedHook()] }] : []),
         ],
       },
     }
@@ -540,20 +619,22 @@ async function runQuery(
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
 
-      // Log result metrics to Logfire
-      if (logfire) {
+      if (tracer) {
         const m = message as Record<string, unknown>;
-        logfire.info('agent.result', {
-          'result.subtype': message.subtype,
-          'result.cost_usd': m.total_cost_usd,
-          'result.duration_ms': m.duration_ms,
-          'result.duration_api_ms': m.duration_api_ms,
-          'result.num_turns': m.num_turns,
-          'result.input_tokens': (m.usage as Record<string, unknown>)?.input_tokens,
-          'result.output_tokens': (m.usage as Record<string, unknown>)?.output_tokens,
-          'result.cache_read_tokens': (m.usage as Record<string, unknown>)?.cache_read_input_tokens,
-          'result.cache_creation_tokens': (m.usage as Record<string, unknown>)?.cache_creation_input_tokens,
-        }, { parentSpan });
+        const usage = m.usage as Record<string, unknown> | undefined;
+        tracer.write({
+          event: 'query.result',
+          queryNumber: resultCount,
+          subtype: message.subtype,
+          costUsd: m.total_cost_usd,
+          durationMs: m.duration_ms,
+          durationApiMs: m.duration_api_ms,
+          numTurns: m.num_turns,
+          inputTokens: usage?.input_tokens,
+          outputTokens: usage?.output_tokens,
+          cacheReadTokens: usage?.cache_read_input_tokens,
+          cacheCreationTokens: usage?.cache_creation_input_tokens,
+        });
       }
 
       writeOutput({
@@ -587,14 +668,17 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Initialize Logfire before anything else (if token available)
-  await initLogfire(containerInput.secrets || {});
-
   // Build SDK env: merge secrets into process.env for the SDK only.
   // Secrets never touch process.env itself, so Bash subprocesses can't see them.
+  // Exception: tool-facing vars (DATABASE_URL, USER_ID) go into process.env
+  // so Bash subprocesses (e.g. psql) can access them.
+  const TOOL_ENV_KEYS = ['DATABASE_URL', 'USER_ID'];
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
   for (const [key, value] of Object.entries(containerInput.secrets || {})) {
     sdkEnv[key] = value;
+    if (TOOL_ENV_KEYS.includes(key)) {
+      process.env[key] = value;
+    }
   }
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -618,11 +702,14 @@ async function main(): Promise<void> {
   }
 
   // Query loop: run query → wait for IPC message → run new query → repeat
-  const sessionSpan = logfire?.startSpan('agent.session', {
-    'session.group': containerInput.groupFolder,
-    'session.chat_jid': containerInput.chatJid,
-    'session.is_main': containerInput.isMain,
-    'session.is_scheduled': containerInput.isScheduledTask ?? false,
+  const tracer = new SessionTracer(sessionId);
+  tracer.write({
+    event: 'session.start',
+    group: containerInput.groupFolder,
+    chatJid: containerInput.chatJid,
+    isMain: containerInput.isMain,
+    isScheduled: containerInput.isScheduledTask ?? false,
+    sessionId,
   });
 
   let resumeAt: string | undefined;
@@ -632,14 +719,20 @@ async function main(): Promise<void> {
       queryCount++;
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const querySpan = logfire?.startSpan('agent.query', {
-        'query.number': queryCount,
-        'query.prompt_length': prompt.length,
-        'query.session_id': sessionId ?? 'new',
-      }, { parentSpan: sessionSpan });
+      tracer.write({
+        event: 'query.start',
+        queryNumber: queryCount,
+        promptLength: prompt.length,
+        sessionId: sessionId ?? 'new',
+      });
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt, querySpan);
-      querySpan?.end();
+      const queryStartTime = Date.now();
+      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt, tracer);
+      tracer.write({
+        event: 'query.end',
+        queryNumber: queryCount,
+        durationMs: Date.now() - queryStartTime,
+      });
 
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
@@ -673,21 +766,22 @@ async function main(): Promise<void> {
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? err.stack : undefined;
     log(`Agent error: ${errorMessage}`);
-    sessionSpan?.setAttribute('error', true);
-    sessionSpan?.setAttribute('error.message', errorMessage);
+    tracer.write({ event: 'session.error', error: errorMessage, stack });
+    tracer.write({ event: 'session.end', queryCount });
+    tracer.close();
     writeOutput({
       status: 'error',
       result: null,
       newSessionId: sessionId,
       error: errorMessage
     });
-    sessionSpan?.end();
     process.exit(1);
   }
 
-  sessionSpan?.setAttribute('session.query_count', queryCount);
-  sessionSpan?.end();
+  tracer.write({ event: 'session.end', queryCount });
+  tracer.close();
 }
 
 main();

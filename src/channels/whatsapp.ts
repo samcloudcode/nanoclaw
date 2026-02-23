@@ -12,7 +12,7 @@ import makeWASocket, {
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
 
-import { ASSISTANT_HAS_OWN_NUMBER, ASSISTANT_NAME, STORE_DIR } from '../config.js';
+import { ASSISTANT_HAS_OWN_NUMBER, ASSISTANT_NAME, GROUPS_DIR, STORE_DIR } from '../config.js';
 import {
   getLastGroupSync,
   setLastGroupSync,
@@ -23,6 +23,15 @@ import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
 import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+function writeHostTrace(groupFolder: string, event: Record<string, unknown>): void {
+  try {
+    const traceDir = path.join(GROUPS_DIR, groupFolder, 'traces');
+    fs.mkdirSync(traceDir, { recursive: true });
+    const line = JSON.stringify({ ts: new Date().toISOString(), ...event }) + '\n';
+    fs.appendFileSync(path.join(traceDir, 'host-events.jsonl'), line);
+  } catch { /* best-effort */ }
+}
 
 export interface WhatsAppChannelOpts {
   onMessage: OnInboundMessage;
@@ -184,13 +193,27 @@ export class WhatsAppChannel implements Channel {
           if (isVoiceMessage(msg)) {
             // Only transcribe voice messages for registered groups (costs API calls)
             if (isRegistered) {
+              const groupFolder = groups[chatJid].folder;
+              const startMs = Date.now();
               try {
                 const transcript = await transcribeAudioMessage(msg, this.sock);
                 content = transcript ? `[Voice: ${transcript}]` : '[Voice Message - transcription unavailable]';
                 logger.info({ chatJid, length: content.length }, 'Transcribed voice message');
+                writeHostTrace(groupFolder, {
+                  event: transcript ? 'transcription.success' : 'transcription.fallback',
+                  chatJid,
+                  durationMs: Date.now() - startMs,
+                  textLength: content.length,
+                });
               } catch (err) {
                 logger.error({ err }, 'Voice transcription error');
                 content = '[Voice Message - transcription failed]';
+                writeHostTrace(groupFolder, {
+                  event: 'transcription.error',
+                  chatJid,
+                  durationMs: Date.now() - startMs,
+                  error: String(err),
+                });
               }
             } else {
               content = '[Voice Message]';

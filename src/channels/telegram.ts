@@ -1,6 +1,9 @@
+import fs from 'fs';
+import path from 'path';
+
 import { Bot } from 'grammy';
 
-import { ASSISTANT_NAME, TELEGRAM_ALLOWED_USERS, TRIGGER_PATTERN } from '../config.js';
+import { ASSISTANT_NAME, GROUPS_DIR, TELEGRAM_ALLOWED_USERS, TRIGGER_PATTERN } from '../config.js';
 import { logger } from '../logger.js';
 import { transcribeBuffer } from '../transcription.js';
 import {
@@ -14,6 +17,15 @@ export interface TelegramChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+}
+
+function writeHostTrace(groupFolder: string, event: Record<string, unknown>): void {
+  try {
+    const traceDir = path.join(GROUPS_DIR, groupFolder, 'traces');
+    fs.mkdirSync(traceDir, { recursive: true });
+    const line = JSON.stringify({ ts: new Date().toISOString(), ...event }) + '\n';
+    fs.appendFileSync(path.join(traceDir, 'host-events.jsonl'), line);
+  } catch { /* best-effort */ }
 }
 
 export class TelegramChannel implements Channel {
@@ -172,6 +184,7 @@ export class TelegramChannel implements Channel {
       const senderName = ctx.from?.first_name || ctx.from?.username || ctx.from?.id?.toString() || 'Unknown';
 
       let content = '[Voice message]';
+      const startMs = Date.now();
       try {
         const file = await ctx.getFile();
         const url = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
@@ -182,10 +195,28 @@ export class TelegramChannel implements Channel {
           if (transcript) {
             content = `[Voice: ${transcript}]`;
             logger.info({ chatJid, length: content.length }, 'Transcribed Telegram voice message');
+            writeHostTrace(group.folder, {
+              event: 'transcription.success',
+              chatJid,
+              durationMs: Date.now() - startMs,
+              textLength: content.length,
+            });
+          } else {
+            writeHostTrace(group.folder, {
+              event: 'transcription.fallback',
+              chatJid,
+              durationMs: Date.now() - startMs,
+            });
           }
         }
       } catch (err) {
         logger.error({ chatJid, err }, 'Failed to transcribe Telegram voice message');
+        writeHostTrace(group.folder, {
+          event: 'transcription.error',
+          chatJid,
+          durationMs: Date.now() - startMs,
+          error: String(err),
+        });
       }
 
       this.opts.onChatMetadata(chatJid, timestamp);
@@ -216,10 +247,23 @@ export class TelegramChannel implements Channel {
       logger.error({ err: err.message }, 'Telegram bot error');
     });
 
+    // Clear any stale polling session from a previous instance
+    try {
+      await this.bot.api.deleteWebhook({ drop_pending_updates: false });
+    } catch (err) {
+      logger.warn('Failed to clear Telegram webhook: ' + String(err));
+    }
+
     // Start polling — returns a Promise that resolves when started
     return new Promise<void>((resolve) => {
+      const timeout = setTimeout(() => {
+        logger.error('Telegram bot start timed out after 30s');
+        resolve(); // don't block startup
+      }, 30_000);
+
       this.bot!.start({
         onStart: (botInfo) => {
+          clearTimeout(timeout);
           logger.info(
             { username: botInfo.username, id: botInfo.id },
             'Telegram bot connected',
@@ -230,6 +274,10 @@ export class TelegramChannel implements Channel {
           );
           resolve();
         },
+      }).catch((err: Error) => {
+        clearTimeout(timeout);
+        logger.error({ err: err.message }, 'Telegram bot.start() failed');
+        resolve(); // don't block startup
       });
     });
   }
