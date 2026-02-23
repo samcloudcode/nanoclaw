@@ -11,6 +11,9 @@ const envConfig = readEnvFile([
   'TELEGRAM_BOT_TOKEN',
   'TELEGRAM_ONLY',
   'TELEGRAM_ALLOWED_USERS',
+  'VOICE_CHAT_JID',
+  'VOICE_SENDER_NAME',
+  'VOICE_ENDPOINT_PORT',
 ]);
 
 export const ASSISTANT_NAME =
@@ -78,3 +81,13 @@ export const TELEGRAM_ONLY =
 export const TELEGRAM_ALLOWED_USERS: number[] = (
   process.env.TELEGRAM_ALLOWED_USERS || envConfig.TELEGRAM_ALLOWED_USERS || ''
 ).split(',').filter(Boolean).map(Number);
+
+// Voice endpoint configuration
+export const VOICE_CHAT_JID =
+  process.env.VOICE_CHAT_JID || envConfig.VOICE_CHAT_JID || '';
+export const VOICE_SENDER_NAME =
+  process.env.VOICE_SENDER_NAME || envConfig.VOICE_SENDER_NAME || 'Voice';
+export const VOICE_ENDPOINT_PORT = parseInt(
+  process.env.VOICE_ENDPOINT_PORT || envConfig.VOICE_ENDPOINT_PORT || '8765',
+  10,
+);

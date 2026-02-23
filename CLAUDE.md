@@ -18,6 +18,7 @@ Runs on **Linux (Fedora)**. Single Node.js process that connects to WhatsApp, ro
 | `src/container-runner.ts` | Spawns agent containers with mounts |
 | `src/task-scheduler.ts` | Runs scheduled tasks |
 | `src/db.ts` | SQLite operations (messages, chats, tasks) |
+| `src/voice-server.ts` | HTTP endpoint for voice hotkey input |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
 | `container/skills/` | Agent skills synced to all groups (see below) |
 
@@ -29,6 +30,10 @@ To add a new agent skill, create `container/skills/<name>/SKILL.md`. It will be 
 
 Existing skills:
 - `agent-browser` — Browser automation via Bash
+- `email-reader` — Read emails via IMAP
+- `fitness-coaching` — Fitness guidance
+- `lifeos-db` — Query/manage Life OS PostgreSQL database (requires `psql`, `DATABASE_URL`, `USER_ID`)
+- `skill-creator` — Guide for creating new skills
 
 ## Host Skills
 
@@ -55,6 +60,14 @@ systemctl --user stop nanoclaw       # Stop
 systemctl --user start nanoclaw      # Start
 journalctl --user -u nanoclaw -f     # Tail logs
 ```
+
+## Container Secrets & Environment
+
+Secrets from `.env` are passed to containers via stdin (never mounted as files). The allowlist lives in `readSecrets()` in `src/container-runner.ts`. To add a new secret, add its key there.
+
+Inside the container, secrets go into `sdkEnv` only (not `process.env`) so Bash subprocesses can't leak them. Exception: keys listed in `TOOL_ENV_KEYS` in `container/agent-runner/src/index.ts` are exported to `process.env` so Bash tools (e.g. `psql`) can use them.
+
+**To make a new `.env` var available to container Bash tools:** add it to both `readSecrets()` and `TOOL_ENV_KEYS`.
 
 ## Container Build Cache
 

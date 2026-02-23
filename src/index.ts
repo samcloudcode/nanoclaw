@@ -38,6 +38,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
+import { startVoiceServer } from './voice-server.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -463,18 +464,22 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
   };
 
-  // Create and connect channels
+  // Create and connect channels concurrently so one doesn't block the other
+  const connectPromises: Promise<void>[] = [];
+
   if (!TELEGRAM_ONLY) {
     whatsapp = new WhatsAppChannel(channelOpts);
     channels.push(whatsapp);
-    await whatsapp.connect();
+    connectPromises.push(whatsapp.connect());
   }
 
   if (TELEGRAM_BOT_TOKEN) {
     const telegram = new TelegramChannel(TELEGRAM_BOT_TOKEN, channelOpts);
     channels.push(telegram);
-    await telegram.connect();
+    connectPromises.push(telegram.connect());
   }
+
+  await Promise.all(connectPromises);
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
@@ -538,6 +543,11 @@ async function main(): Promise<void> {
           return results;
         }
       : undefined,
+  });
+  startVoiceServer({
+    channels,
+    queue,
+    registeredGroups: () => registeredGroups,
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();

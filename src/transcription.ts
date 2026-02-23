@@ -36,6 +36,8 @@ function loadConfig(): TranscriptionConfig {
 async function transcribeWithOpenAI(
   audioBuffer: Buffer,
   config: TranscriptionConfig,
+  filename = 'voice.ogg',
+  mimeType = 'audio/ogg',
 ): Promise<string | null> {
   if (!config.openai?.apiKey || config.openai.apiKey === '') {
     console.warn('OpenAI API key not configured');
@@ -53,8 +55,8 @@ async function transcribeWithOpenAI(
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      const file = await toFile(audioBuffer, 'voice.ogg', {
-        type: 'audio/ogg',
+      const file = await toFile(audioBuffer, filename, {
+        type: mimeType,
       });
 
       const transcription = await openai.audio.transcriptions.create({
@@ -88,6 +90,8 @@ async function transcribeWithOpenAI(
  */
 export async function transcribeBuffer(
   audioBuffer: Buffer,
+  filename = 'voice.ogg',
+  mimeType = 'audio/ogg',
 ): Promise<string | null> {
   const config = loadConfig();
 
@@ -103,7 +107,7 @@ export async function transcribeBuffer(
 
   switch (config.provider) {
     case 'openai':
-      transcript = await transcribeWithOpenAI(audioBuffer, config);
+      transcript = await transcribeWithOpenAI(audioBuffer, config, filename, mimeType);
       break;
     default:
       console.error(`Unknown transcription provider: ${config.provider}`);
