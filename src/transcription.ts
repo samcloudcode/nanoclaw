@@ -61,7 +61,7 @@ async function transcribeWithOpenAI(
 
       const transcription = await openai.audio.transcriptions.create({
         file: file,
-        model: config.openai.model || 'whisper-1',
+        model: config.openai.model || 'gpt-4o-transcribe',
         response_format: 'text',
       });
 
@@ -71,7 +71,7 @@ async function transcribeWithOpenAI(
       const isNetworkError = err instanceof TypeError && (err as any).message?.includes('fetch failed');
       const label = isNetworkError ? 'Network error' : 'API error';
       if (attempt < maxRetries) {
-        const delay = attempt * 1000;
+        const delay = Math.min(2 ** attempt * 500, 8000) + Math.random() * 500;
         console.warn(`OpenAI transcription ${label} (attempt ${attempt}/${maxRetries}), retrying in ${delay}ms...`);
         await new Promise((resolve) => setTimeout(resolve, delay));
       } else {

@@ -186,11 +186,29 @@ export class TelegramChannel implements Channel {
       let content = '[Voice message]';
       const startMs = Date.now();
       try {
-        const file = await ctx.getFile();
-        const url = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
-        const response = await fetch(url);
-        if (response.ok) {
-          const buffer = Buffer.from(await response.arrayBuffer());
+        // Retry file download with exponential backoff
+        let buffer: Buffer | null = null;
+        const maxRetries = 3;
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+          try {
+            const file = await ctx.getFile();
+            const url = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
+            const response = await fetch(url);
+            if (response.ok) {
+              buffer = Buffer.from(await response.arrayBuffer());
+              break;
+            }
+            logger.warn({ chatJid, status: response.status, attempt }, 'Telegram voice download failed');
+          } catch (downloadErr) {
+            logger.warn({ chatJid, attempt, err: downloadErr }, 'Telegram voice download error');
+          }
+          if (attempt < maxRetries) {
+            const delay = Math.min(2 ** attempt * 500, 8000) + Math.random() * 500;
+            await new Promise((r) => setTimeout(r, delay));
+          }
+        }
+
+        if (buffer && buffer.length > 0) {
           const transcript = await transcribeBuffer(buffer);
           if (transcript) {
             content = `[Voice: ${transcript}]`;
@@ -208,6 +226,13 @@ export class TelegramChannel implements Channel {
               durationMs: Date.now() - startMs,
             });
           }
+        } else {
+          logger.error({ chatJid }, 'Failed to download Telegram voice file after retries');
+          writeHostTrace(group.folder, {
+            event: 'transcription.download_failed',
+            chatJid,
+            durationMs: Date.now() - startMs,
+          });
         }
       } catch (err) {
         logger.error({ chatJid, err }, 'Failed to transcribe Telegram voice message');
@@ -293,14 +318,21 @@ export class TelegramChannel implements Channel {
 
       // Telegram has a 4096 character limit per message — split if needed
       const MAX_LENGTH = 4096;
-      if (text.length <= MAX_LENGTH) {
-        await this.bot.api.sendMessage(numericId, text);
-      } else {
-        for (let i = 0; i < text.length; i += MAX_LENGTH) {
-          await this.bot.api.sendMessage(
-            numericId,
-            text.slice(i, i + MAX_LENGTH),
-          );
+      const chunks =
+        text.length <= MAX_LENGTH
+          ? [text]
+          : Array.from({ length: Math.ceil(text.length / MAX_LENGTH) }, (_, i) =>
+              text.slice(i * MAX_LENGTH, (i + 1) * MAX_LENGTH),
+            );
+
+      for (const chunk of chunks) {
+        try {
+          await this.bot.api.sendMessage(numericId, chunk, {
+            parse_mode: 'Markdown',
+          });
+        } catch {
+          // Markdown parse failed — send as plain text
+          await this.bot.api.sendMessage(numericId, chunk);
         }
       }
       logger.info({ jid, length: text.length }, 'Telegram message sent');

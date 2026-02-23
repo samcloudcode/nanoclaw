@@ -69,6 +69,24 @@ Inside the container, secrets go into `sdkEnv` only (not `process.env`) so Bash 
 
 **To make a new `.env` var available to container Bash tools:** add it to both `readSecrets()` and `TOOL_ENV_KEYS`.
 
+## Production Server
+
+DigitalOcean Droplet at `165.232.50.199` (Singapore), Ubuntu 24.04, 4GB/2vCPU.
+
+SSH aliases (in `~/.ssh/config`):
+```bash
+ssh nanoclaw              # Plain SSH
+ssh nanoclaw-vnc          # SSH + VNC tunnel (then connect Remmina VNC to localhost:5901)
+```
+
+Desktop: XFCE via TigerVNC on display `:1` (systemd user service `vncserver`). Used for Obsidian and Proton Bridge.
+
+Key services (systemd user):
+```bash
+ssh nanoclaw 'systemctl --user status nanoclaw'      # NanoClaw
+ssh nanoclaw 'systemctl --user status vncserver'      # VNC desktop
+```
+
 ## Container Build Cache
 
 Docker buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps. To force a truly clean rebuild:
