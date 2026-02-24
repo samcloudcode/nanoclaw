@@ -76,11 +76,6 @@ function truncateWords(text, maxWords) {
   return words.slice(0, maxWords).join(' ') + '...';
 }
 
-function truncateChars(text, maxChars) {
-  if (text.length <= maxChars) return text;
-  return text.slice(0, maxChars) + '\n\n[truncated — message too long]';
-}
-
 function formatAddress(addr) {
   if (!addr || !addr[0]) return '(unknown)';
   const a = addr[0];
@@ -240,7 +235,7 @@ async function cmdRead(opts) {
       console.log('\n---\n');
 
       const body = parsed.text || (parsed.html ? stripHtml(parsed.html) : '(no body)');
-      console.log(truncateChars(body, 4000));
+      console.log(body);
     } finally {
       lock.release();
     }
