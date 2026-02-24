@@ -172,7 +172,51 @@ export class TelegramChannel implements Channel {
       });
     };
 
-    this.bot.on('message:photo', (ctx) => storeNonText(ctx, '[Photo]'));
+    this.bot.on('message:photo', async (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+      if (TELEGRAM_ALLOWED_USERS.length > 0 && !TELEGRAM_ALLOWED_USERS.includes(ctx.from?.id ?? 0)) return;
+
+      const timestamp = new Date(ctx.message.date * 1000).toISOString();
+      const senderName = ctx.from?.first_name || ctx.from?.username || ctx.from?.id?.toString() || 'Unknown';
+      const msgId = ctx.message.message_id.toString();
+      const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
+
+      // Try to download and save the photo so the agent can view it
+      let content = `[Photo]${caption}`;
+      try {
+        // Get the largest photo size (last in array)
+        const photos = ctx.message.photo;
+        const largest = photos[photos.length - 1];
+        const file = await ctx.api.getFile(largest.file_id);
+        const url = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
+        const response = await fetch(url);
+
+        if (response.ok) {
+          const buffer = Buffer.from(await response.arrayBuffer());
+          const mediaDir = path.join(GROUPS_DIR, group.folder, 'media');
+          fs.mkdirSync(mediaDir, { recursive: true });
+          const filename = `${msgId}.jpg`;
+          fs.writeFileSync(path.join(mediaDir, filename), buffer);
+          content = `[Photo: media/${filename}]${caption}`;
+          logger.info({ chatJid, filename }, 'Saved Telegram photo');
+        }
+      } catch (err) {
+        logger.warn({ chatJid, err }, 'Failed to download Telegram photo, using placeholder');
+      }
+
+      this.opts.onChatMetadata(chatJid, timestamp);
+      this.opts.onMessage(chatJid, {
+        id: msgId,
+        chat_jid: chatJid,
+        sender: ctx.from?.id?.toString() || '',
+        sender_name: senderName,
+        content,
+        timestamp,
+        is_from_me: false,
+      });
+    });
     this.bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
     this.bot.on('message:voice', async (ctx) => {
       const chatJid = `tg:${ctx.chat.id}`;
