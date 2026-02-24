@@ -19,21 +19,31 @@ Runs on **Linux (Fedora)**. Single Node.js process that connects to WhatsApp, ro
 | `src/task-scheduler.ts` | Runs scheduled tasks |
 | `src/db.ts` | SQLite operations (messages, chats, tasks) |
 | `src/voice-server.ts` | HTTP endpoint for voice hotkey input |
-| `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
-| `container/skills/` | Agent skills synced to all groups (see below) |
+| `groups/{name}/CLAUDE.md` | Per-group memory (overlay from vault) |
 
-## Agent Skills
+## Agent Skills & Vault Sync
 
-Skills in `container/skills/<name>/SKILL.md` are automatically synced into each group's `.claude/skills/` directory at container start (`container-runner.ts`). The container agents have the `Skill` tool enabled, so they can invoke any skill placed here.
+Skills and group CLAUDE.md files live in the **Obsidian vault** at `~/Documents/Life/NanoClaw/`, synced across devices via Obsidian Sync. The vault is the single source of truth.
 
-To add a new agent skill, create `container/skills/<name>/SKILL.md`. It will be available to all groups on next container run.
+### How it works
 
-Existing skills:
-- `agent-browser` — Browser automation via Bash
-- `email-reader` — Read emails via IMAP
-- `fitness-coaching` — Fitness guidance
-- `lifeos-db` — Query/manage Life OS PostgreSQL database (requires `psql`, `DATABASE_URL`, `USER_ID`)
-- `skill-creator` — Guide for creating new skills
+Skills (`~/Documents/Life/NanoClaw/skills/`) are **directly mounted** into containers at `/home/node/.claude/skills/`. Agent writes to `.claude/skills/` go straight to the vault — no copy step. Config: `VAULT_SKILLS_DIR` in `src/config.ts`, mount in `src/container-runner.ts`.
+
+Group CLAUDE.md files (`~/Documents/Life/NanoClaw/groups/{folder}/CLAUDE.md`) are mounted as **single-file overlays** on top of `groups/{folder}/`. Agent edits write directly to the vault. Logs, traces, and conversations stay in the repo's `groups/` dir.
+
+Fallback: if vault paths don't exist, falls back to `container/skills/` and `groups/` in the repo.
+
+### Vault structure
+```
+~/Documents/Life/NanoClaw/
+  skills/           → mounted at /home/node/.claude/skills/ (read-write)
+  groups/
+    main/CLAUDE.md  → overlaid at /workspace/group/CLAUDE.md
+    global/CLAUDE.md → overlaid at /workspace/global/CLAUDE.md (read-only for non-main)
+```
+
+### Adding a skill
+Create `~/Documents/Life/NanoClaw/skills/<name>/SKILL.md` (or ask the agent to use the `skill-creator` skill). Available to all groups on next container start.
 
 ## Host Skills
 

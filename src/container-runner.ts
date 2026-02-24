@@ -14,6 +14,8 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  VAULT_GROUPS_DIR,
+  VAULT_SKILLS_DIR,
 } from './config.js';
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
@@ -99,6 +101,29 @@ function buildVolumeMounts(
     }
   }
 
+  // Overlay CLAUDE.md from vault if it exists (single-file bind mount).
+  // Agent edits write directly to the vault file, synced via Obsidian Sync.
+  const vaultClaudeMd = path.join(VAULT_GROUPS_DIR, group.folder, 'CLAUDE.md');
+  if (fs.existsSync(vaultClaudeMd)) {
+    mounts.push({
+      hostPath: vaultClaudeMd,
+      containerPath: '/workspace/group/CLAUDE.md',
+      readonly: false,
+    });
+  }
+
+  // Overlay global CLAUDE.md from vault for non-main groups
+  if (!isMain) {
+    const vaultGlobalClaudeMd = path.join(VAULT_GROUPS_DIR, 'global', 'CLAUDE.md');
+    if (fs.existsSync(vaultGlobalClaudeMd)) {
+      mounts.push({
+        hostPath: vaultGlobalClaudeMd,
+        containerPath: '/workspace/global/CLAUDE.md',
+        readonly: true,
+      });
+    }
+  }
+
   // Per-group Claude sessions directory (isolated from other groups)
   // Each group gets their own .claude/ to prevent cross-group session access
   const groupSessionsDir = path.join(
@@ -125,31 +150,24 @@ function buildVolumeMounts(
     }, null, 2) + '\n');
   }
 
-  // Sync skills from container/skills/ into each group's .claude/skills/
-  const skillsSrc = path.join(process.cwd(), 'container', 'skills');
-  const skillsDst = path.join(groupSessionsDir, 'skills');
-  if (fs.existsSync(skillsSrc)) {
-    for (const skillDir of fs.readdirSync(skillsSrc)) {
-      const srcDir = path.join(skillsSrc, skillDir);
-      if (!fs.statSync(srcDir).isDirectory()) continue;
-      const dstDir = path.join(skillsDst, skillDir);
-      fs.mkdirSync(dstDir, { recursive: true });
-      for (const entry of fs.readdirSync(srcDir)) {
-        const srcPath = path.join(srcDir, entry);
-        const dstPath = path.join(dstDir, entry);
-        if (fs.statSync(srcPath).isDirectory()) {
-          fs.cpSync(srcPath, dstPath, { recursive: true });
-        } else {
-          fs.copyFileSync(srcPath, dstPath);
-        }
-      }
-    }
-  }
   mounts.push({
     hostPath: groupSessionsDir,
     containerPath: '/home/node/.claude',
     readonly: false,
   });
+
+  // Mount skills directly from vault (or repo fallback) into .claude/skills/
+  // This overlays the skills dir on top of the .claude mount above.
+  // Agent writes to .claude/skills/ go straight to the vault via Obsidian Sync.
+  const repoSkillsSrc = path.join(process.cwd(), 'container', 'skills');
+  const skillsSrc = fs.existsSync(VAULT_SKILLS_DIR) ? VAULT_SKILLS_DIR : repoSkillsSrc;
+  if (fs.existsSync(skillsSrc)) {
+    mounts.push({
+      hostPath: skillsSrc,
+      containerPath: '/home/node/.claude/skills',
+      readonly: false,
+    });
+  }
 
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC

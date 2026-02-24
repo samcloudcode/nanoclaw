@@ -39,6 +39,15 @@ export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 export const MAIN_GROUP_FOLDER = 'main';
 
+// Vault paths for Obsidian Sync — skills and group CLAUDE.md files
+// Falls back to repo paths if vault directories don't exist
+export const VAULT_SKILLS_DIR = path.resolve(
+  process.env.VAULT_SKILLS_DIR || path.join(HOME_DIR, 'Documents', 'Life', 'NanoClaw', 'skills'),
+);
+export const VAULT_GROUPS_DIR = path.resolve(
+  process.env.VAULT_GROUPS_DIR || path.join(HOME_DIR, 'Documents', 'Life', 'NanoClaw', 'groups'),
+);
+
 export const CONTAINER_IMAGE =
   process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
 export const CONTAINER_TIMEOUT = parseInt(
