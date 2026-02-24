@@ -131,6 +131,25 @@ xrdp + XFCE on Ubuntu 24.04 doesn't work reliably (black/turquoise screen). Tige
 ### Dev vs prod bot tokens
 Local `.env` uses a dev Telegram bot token, server uses prod. Never run both with the same token — only one can poll Telegram at a time.
 
+## Voice Hotkey (Local Machine)
+
+The voice hotkey (`scripts/voice-hotkey.sh`) sends audio to the server via an SSH tunnel.
+
+**Local services (systemd user on laptop):**
+
+| Service | Purpose |
+|---------|---------|
+| `nanoclaw-tunnel` | autossh persistent SSH tunnel forwarding port 8765 |
+
+```bash
+systemctl --user status nanoclaw-tunnel   # Check tunnel
+journalctl --user -u nanoclaw-tunnel -f   # Tunnel logs
+```
+
+The tunnel uses the `nanoclaw` SSH config alias (`LocalForward 8765 localhost:8765`). It starts on login, reconnects on drops, and restarts via systemd if the process dies.
+
+The hotkey script defaults to `http://localhost:8765` which routes through the tunnel to the server's voice endpoint.
+
 ## Future
 
 - [ ] Web chat via Cloudflare Tunnel to `localhost:3420`
