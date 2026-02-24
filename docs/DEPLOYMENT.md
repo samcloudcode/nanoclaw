@@ -43,7 +43,7 @@ ssh nanoclaw 'journalctl --user -u nanoclaw -f'    # Tail logs
 ### Desktop apps (via VNC)
 
 - **Obsidian** — real app with Obsidian Sync, vault at `/home/nanoclaw/Documents/Life`
-- **Proton Bridge** — planned
+- **Proton Bridge** — systemd user service, IMAP on `127.0.0.1:1143`, SMTP on `127.0.0.1:1025`. See [PROTON-BRIDGE.md](PROTON-BRIDGE.md)
 
 ### Key paths on server
 
@@ -82,6 +82,14 @@ ssh nanoclaw 'cd ~/nanoclaw && git pull && npm ci && npm run build && systemctl 
 
 ```bash
 ssh nanoclaw 'cd ~/nanoclaw && ./container/build.sh'
+```
+
+### Skill scripts
+
+Scripts (.mjs, .sh) in `container/skills/` don't sync via Obsidian. After changing a skill script, sync to the server:
+
+```bash
+rsync -a --exclude='*.md' container/skills/ nanoclaw:~/Documents/Life/NanoClaw/skills/
 ```
 
 ### Files not in git (must copy manually)
@@ -153,7 +161,7 @@ The hotkey script defaults to `http://localhost:8765` which routes through the t
 ## Future
 
 - [ ] Web chat via Cloudflare Tunnel to `localhost:3420`
-- [ ] Proton Bridge on desktop
+- [x] Proton Bridge on desktop
 - [ ] Cron jobs for disk hygiene
 - [ ] DigitalOcean monitoring alerts
 - [ ] Dead man's switch scheduled task

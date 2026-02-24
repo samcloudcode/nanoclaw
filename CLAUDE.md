@@ -27,9 +27,15 @@ Skills and group CLAUDE.md files live in the **Obsidian vault** at `~/Documents/
 
 ### How it works
 
-Skills (`~/Documents/Life/NanoClaw/skills/`) are **directly mounted** into containers at `/home/node/.claude/skills/`. Agent writes to `.claude/skills/` go straight to the vault — no copy step. Config: `VAULT_SKILLS_DIR` in `src/config.ts`, mount in `src/container-runner.ts`.
+**Markdown files** (SKILL.md, references/) live in the vault, synced via Obsidian Sync. **Scripts** (.mjs, .sh) live in `container/skills/` in the git repo and must be scp'd to the server vault when changed:
 
-Group CLAUDE.md files (`~/Documents/Life/NanoClaw/groups/{folder}/CLAUDE.md`) are mounted as **single-file overlays** on top of `groups/{folder}/`. Agent edits write directly to the vault. Logs, traces, and conversations stay in the repo's `groups/` dir.
+```bash
+rsync -a --exclude='*.md' container/skills/ nanoclaw:~/Documents/Life/NanoClaw/skills/
+```
+
+The vault skills dir is **directly mounted** into containers at `/home/node/.claude/skills/`. Config: `VAULT_SKILLS_DIR` in `src/config.ts`, mount in `src/container-runner.ts`.
+
+Group CLAUDE.md files are mounted as **single-file overlays** from vault. Agent edits write directly to the vault. Logs, traces, and conversations stay in `groups/`.
 
 Fallback: if vault paths don't exist, falls back to `container/skills/` and `groups/` in the repo.
 
@@ -37,13 +43,15 @@ Fallback: if vault paths don't exist, falls back to `container/skills/` and `gro
 ```
 ~/Documents/Life/NanoClaw/
   skills/           → mounted at /home/node/.claude/skills/ (read-write)
+    <name>/SKILL.md       ← vault (Obsidian Sync)
+    <name>/*.mjs, *.sh    ← git repo (scp'd to server)
   groups/
     main/CLAUDE.md  → overlaid at /workspace/group/CLAUDE.md
     global/CLAUDE.md → overlaid at /workspace/global/CLAUDE.md (read-only for non-main)
 ```
 
 ### Adding a skill
-Create `~/Documents/Life/NanoClaw/skills/<name>/SKILL.md` (or ask the agent to use the `skill-creator` skill). Available to all groups on next container start.
+Create `~/Documents/Life/NanoClaw/skills/<name>/SKILL.md` (or ask the agent to use the `skill-creator` skill). If the skill includes scripts, add them to `container/skills/<name>/` in the repo and sync to server.
 
 ## Host Skills
 
