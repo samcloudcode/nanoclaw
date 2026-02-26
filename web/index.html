@@ -66,6 +66,9 @@ html, body {
   line-height: 1.7;
   -webkit-font-smoothing: antialiased;
   font-optical-sizing: auto;
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }
 
 /* Hidden scrollbar */
@@ -183,6 +186,8 @@ html, body {
 #messages {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
 }
@@ -588,6 +593,34 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
 #send-btn:disabled { color: var(--text-muted); cursor: default; }
 #send-btn:disabled:hover { background: transparent; color: var(--text-muted); }
 .icon-btn-sm { width: 30px; height: 30px; }
+
+/* ─── Mobile ─── */
+@media (max-width: 600px) {
+  #input-bar {
+    padding: 6px 12px 10px;
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+  #input-wrap { width: 100%; }
+  #text-input { font-size: 16px; padding: 10px 14px; border-radius: 16px; }
+  .input-actions {
+    justify-content: center;
+    gap: 12px;
+  }
+  .input-actions .icon-btn {
+    width: 42px;
+    height: 42px;
+  }
+  #voice-btn { order: 0; }
+  #send-btn { order: 1; }
+  .msg.me { padding: 8px 12px; }
+  .msg.them { padding: 12px 12px 4px; }
+  .msg.me .msg-body { max-width: 85%; }
+  #messages { overscroll-behavior: contain; }
+  #header { padding: 4px 12px; }
+}
 
 </style>
 </head>
