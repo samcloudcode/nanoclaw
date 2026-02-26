@@ -14,6 +14,8 @@ const envConfig = readEnvFile([
   'VOICE_CHAT_JID',
   'VOICE_SENDER_NAME',
   'VOICE_ENDPOINT_PORT',
+  'WEB_PORT',
+  'WEB_AUTH_TOKEN',
 ]);
 
 export const ASSISTANT_NAME =
@@ -100,3 +102,11 @@ export const VOICE_ENDPOINT_PORT = parseInt(
   process.env.VOICE_ENDPOINT_PORT || envConfig.VOICE_ENDPOINT_PORT || '8765',
   10,
 );
+
+// Web channel configuration
+export const WEB_PORT = parseInt(
+  process.env.WEB_PORT || envConfig.WEB_PORT || '8080',
+  10,
+);
+export const WEB_AUTH_TOKEN =
+  process.env.WEB_AUTH_TOKEN || envConfig.WEB_AUTH_TOKEN || '';

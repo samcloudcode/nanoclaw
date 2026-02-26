@@ -11,10 +11,13 @@ import {
   TELEGRAM_BOT_TOKEN,
   TELEGRAM_ONLY,
   TRIGGER_PATTERN,
+  WEB_AUTH_TOKEN,
 } from './config.js';
 import { TelegramChannel } from './channels/telegram.js';
+import { WebChannel } from './channels/web.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
+  ActivityEvent,
   ContainerOutput,
   runContainerAgent,
   writeGroupsSnapshot,
@@ -176,6 +179,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
+  // Activity callback — forward to web channel if applicable
+  const onActivity = channel.name === 'web'
+    ? (event: ActivityEvent) => (channel as WebChannel).broadcastActivity(chatJid, event)
+    : undefined;
+
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {
@@ -194,7 +202,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (result.status === 'error') {
       hadError = true;
     }
-  });
+  }, onActivity);
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
@@ -221,6 +229,7 @@ async function runAgent(
   prompt: string,
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
+  onActivity?: (event: ActivityEvent) => void,
 ): Promise<'success' | 'error'> {
   const isMain = group.folder === MAIN_GROUP_FOLDER;
   const sessionId = sessions[group.folder];
@@ -273,6 +282,7 @@ async function runAgent(
       },
       (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
       wrappedOnOutput,
+      onActivity,
     );
 
     if (output.newSessionId) {
@@ -477,6 +487,16 @@ async function main(): Promise<void> {
     const telegram = new TelegramChannel(TELEGRAM_BOT_TOKEN, channelOpts);
     channels.push(telegram);
     connectPromises.push(telegram.connect());
+  }
+
+  if (WEB_AUTH_TOKEN) {
+    const web = new WebChannel(WEB_AUTH_TOKEN, {
+      ...channelOpts,
+      queue,
+      registerGroup,
+    });
+    channels.push(web);
+    connectPromises.push(web.connect());
   }
 
   await Promise.all(connectPromises);

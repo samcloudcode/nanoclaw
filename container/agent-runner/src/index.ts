@@ -97,6 +97,8 @@ class SessionTracer {
       if (toolUseId) {
         this.toolTimers.set(toolUseId, Date.now());
       }
+      const pre = input as PreToolUseHookInput;
+      writeActivity('tool_start', { tool: pre.tool_name, input: summarizeInput(pre.tool_input) });
       return {};
     };
   }
@@ -115,6 +117,7 @@ class SessionTracer {
         output: truncate(post.tool_response, MAX_OUTPUT_LEN),
         durationMs,
       });
+      writeActivity('tool_end', { tool: post.tool_name, durationMs });
       return {};
     };
   }
@@ -145,6 +148,7 @@ class SessionTracer {
         agentId: sa.agent_id,
         agentType: sa.agent_type,
       });
+      writeActivity('subagent_start', { agentType: sa.agent_type });
       return {};
     };
   }
@@ -157,6 +161,7 @@ class SessionTracer {
         agentId: sa.agent_id,
         agentType: sa.agent_type,
       });
+      writeActivity('subagent_stop', { agentType: sa.agent_type });
       return {};
     };
   }
@@ -234,6 +239,32 @@ function writeOutput(output: ContainerOutput): void {
   console.log(OUTPUT_START_MARKER);
   console.log(JSON.stringify(output));
   console.log(OUTPUT_END_MARKER);
+}
+
+function writeActivity(event: string, data?: Record<string, unknown>): void {
+  console.log(OUTPUT_START_MARKER);
+  console.log(JSON.stringify({ type: 'activity', event, ...data }));
+  console.log(OUTPUT_END_MARKER);
+}
+
+/**
+ * Extract display-relevant fields from tool input for activity streaming.
+ * Keeps frame size small and avoids leaking sensitive data.
+ */
+function summarizeInput(toolInput: unknown): Record<string, unknown> | undefined {
+  if (!toolInput || typeof toolInput !== 'object') return undefined;
+  const input = toolInput as Record<string, unknown>;
+  const summary: Record<string, unknown> = {};
+
+  if (typeof input.file_path === 'string') summary.file_path = input.file_path;
+  if (typeof input.pattern === 'string') summary.pattern = input.pattern.slice(0, 80);
+  if (typeof input.command === 'string') summary.command = input.command.slice(0, 60);
+  if (typeof input.description === 'string') summary.description = input.description.slice(0, 80);
+  if (typeof input.subagent_type === 'string') summary.subagent_type = input.subagent_type;
+  if (typeof input.url === 'string') summary.url = input.url.slice(0, 100);
+  if (typeof input.query === 'string') summary.query = input.query.slice(0, 80);
+
+  return Object.keys(summary).length > 0 ? summary : undefined;
 }
 
 function log(message: string): void {

@@ -243,11 +243,21 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string): strin
   return args;
 }
 
+export interface ActivityEvent {
+  type: 'activity';
+  event: string;
+  tool?: string;
+  input?: Record<string, unknown>;
+  durationMs?: number;
+  agentType?: string;
+}
+
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
   onProcess: (proc: ChildProcess, containerName: string) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
+  onActivity?: (event: ActivityEvent) => void,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
@@ -341,16 +351,23 @@ export async function runContainerAgent(
           parseBuffer = parseBuffer.slice(endIdx + OUTPUT_END_MARKER.length);
 
           try {
-            const parsed: ContainerOutput = JSON.parse(jsonStr);
-            if (parsed.newSessionId) {
-              newSessionId = parsed.newSessionId;
+            const parsed = JSON.parse(jsonStr);
+            if (parsed.type === 'activity') {
+              // Activity events are fire-and-forget, don't reset timeout
+              onActivity?.(parsed as ActivityEvent);
+            } else {
+              // Result event (existing behavior)
+              const result = parsed as ContainerOutput;
+              if (result.newSessionId) {
+                newSessionId = result.newSessionId;
+              }
+              hadStreamingOutput = true;
+              // Activity detected — reset the hard timeout
+              resetTimeout();
+              // Call onOutput for all markers (including null results)
+              // so idle timers start even for "silent" query completions.
+              outputChain = outputChain.then(() => onOutput(result));
             }
-            hadStreamingOutput = true;
-            // Activity detected — reset the hard timeout
-            resetTimeout();
-            // Call onOutput for all markers (including null results)
-            // so idle timers start even for "silent" query completions.
-            outputChain = outputChain.then(() => onOutput(parsed));
           } catch (err) {
             logger.warn(
               { group: group.name, error: err },

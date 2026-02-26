@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <g fill="none" stroke="#7a7a85" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Speech bubble -->
+    <rect x="76" y="80" width="360" height="270" rx="50" stroke-width="28"/>
+    <path d="M160 350 L130 430 L220 350" stroke-width="28" fill="none"/>
+    <!-- Three dots -->
+    <circle cx="196" cy="215" r="18" fill="#7a7a85" stroke="none"/>
+    <circle cx="256" cy="215" r="18" fill="#7a7a85" stroke="none"/>
+    <circle cx="316" cy="215" r="18" fill="#7a7a85" stroke="none"/>
+  </g>
+</svg>

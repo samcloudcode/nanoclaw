@@ -28,6 +28,19 @@ function writeHostTrace(groupFolder: string, event: Record<string, unknown>): vo
   } catch { /* best-effort */ }
 }
 
+function extractReplyContext(msg: any): string {
+  const reply = msg.reply_to_message;
+  if (!reply) return '';
+  const replyFrom =
+    reply.from?.first_name || reply.from?.username || 'Unknown';
+  const replyText =
+    reply.text || reply.caption || '[media]';
+  // Truncate long quoted messages
+  const truncated =
+    replyText.length > 200 ? replyText.slice(0, 200) + '…' : replyText;
+  return `[Replying to ${replyFrom}: "${truncated}"]\n`;
+}
+
 export class TelegramChannel implements Channel {
   name = 'telegram';
 
@@ -71,7 +84,8 @@ export class TelegramChannel implements Channel {
       if (ctx.message.text.startsWith('/')) return;
 
       const chatJid = `tg:${ctx.chat.id}`;
-      let content = ctx.message.text;
+      const replyContext = extractReplyContext(ctx.message);
+      let content = replyContext + ctx.message.text;
       const timestamp = new Date(ctx.message.date * 1000).toISOString();
       const senderName =
         ctx.from?.first_name ||
@@ -159,6 +173,7 @@ export class TelegramChannel implements Channel {
         ctx.from?.id?.toString() ||
         'Unknown';
       const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
+      const replyContext = extractReplyContext(ctx.message);
 
       this.opts.onChatMetadata(chatJid, timestamp);
       this.opts.onMessage(chatJid, {
@@ -166,7 +181,7 @@ export class TelegramChannel implements Channel {
         chat_jid: chatJid,
         sender: ctx.from?.id?.toString() || '',
         sender_name: senderName,
-        content: `${placeholder}${caption}`,
+        content: `${replyContext}${placeholder}${caption}`,
         timestamp,
         is_from_me: false,
       });

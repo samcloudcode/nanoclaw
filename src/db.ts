@@ -343,6 +343,21 @@ export function getMessagesSince(
     .all(chatJid, sinceTimestamp, `${botPrefix}:%`) as NewMessage[];
 }
 
+export function getRecentMessages(
+  chatJid: string,
+  limit = 50,
+): NewMessage[] {
+  return db
+    .prepare(
+      `SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message
+       FROM messages
+       WHERE chat_jid = ?
+       ORDER BY timestamp DESC
+       LIMIT ?`,
+    )
+    .all(chatJid, limit) as NewMessage[];
+}
+
 export function getOldestMessage(
   chatJid: string,
 ): { id: string; is_from_me: number; timestamp: string } | undefined {
