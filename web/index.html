@@ -643,12 +643,13 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
 }
 /* ─── Chat images ─── */
 .chat-image {
-  max-width: 300px;
+  max-width: 100%;
   border-radius: 8px;
   cursor: pointer;
   display: block;
   margin: 4px 0;
 }
+.msg.them .chat-image { max-width: min(300px, 100%); }
 #send-btn.uploading {
   animation: spin 1s linear infinite;
 }
