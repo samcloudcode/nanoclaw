@@ -528,11 +528,13 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
   max-width: var(--max-w);
   width: 100%;
   margin: 0 auto;
-  padding: 12px 24px 12px;
+  padding: 6px 24px 8px;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 6px;
+  gap: 4px;
+  flex-shrink: 0;
+  background: var(--bg);
 }
 .input-top { align-self: flex-end; display: flex; gap: 2px; }
 #voice-btn { width: 46px; height: 46px; }
@@ -1090,7 +1092,7 @@ function renderMarkdown(text) {
 
   // Render [Photo: media/...] as inline images
   s = s.replace(/\[Photo: (media\/[^\]]+)\]/g, (_, p) => {
-    const src = `/media/${p.slice('media/'.length)}?token=${encodeURIComponent(token)}`;
+    const src = `${serverOrigin}/media/${p.slice('media/'.length)}?token=${encodeURIComponent(token)}`;
     return `<a href="${src}" target="_blank"><img class="chat-image" src="${src}" loading="lazy"></a>`;
   });
 
@@ -1188,7 +1190,7 @@ async function send() {
     const paths = [];
     for (const item of pendingImages) {
       try {
-        const res = await fetch('/api/upload', {
+        const res = await fetch(`${serverOrigin}/api/upload`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -1331,7 +1333,7 @@ function stopRecording() {
     if (duration < 500) { cleanup(); return; }
     const blob = new Blob(voiceChunks, { type: 'audio/webm' });
     try {
-      await fetch('/api/voice', {
+      await fetch(`${serverOrigin}/api/voice`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         body: blob,
@@ -1343,6 +1345,24 @@ function stopRecording() {
     if (mediaRecorder?.stream) mediaRecorder.stream.getTracks().forEach(t => t.stop());
     mediaRecorder = null;
     voiceChunks = [];
+  }
+}
+
+// ─── Tauri Desktop Integration ───
+if (window.__TAURI__) {
+  // Listen for global shortcut voice toggle
+  window.__TAURI__.event.listen('toggle-voice', () => {
+    if (mediaRecorder && mediaRecorder.state === 'recording') stopRecording();
+    else startRecording();
+  });
+
+  // First-launch: prompt for server URL if not configured
+  if (!localStorage.getItem('nanoclaw_server')) {
+    const url = prompt('Enter your NanoClaw server URL:', 'https://chat.life-ops.co');
+    if (url) {
+      localStorage.setItem('nanoclaw_server', url.replace(/\/+$/, ''));
+      location.reload();
+    }
   }
 }
 </script>
