@@ -528,15 +528,15 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
   max-width: var(--max-w);
   width: 100%;
   margin: 0 auto;
-  padding: 8px 24px 12px;
+  padding: 12px 24px 12px;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 4px;
 }
 .input-top { align-self: flex-end; }
-#voice-btn { width: 42px; height: 42px; }
-#voice-btn svg { width: 20px; height: 20px; }
+#voice-btn { width: 46px; height: 46px; }
+#voice-btn svg { width: 22px; height: 22px; }
 .input-bubble {
   width: 100%;
   display: flex;
@@ -983,6 +983,7 @@ function renderMarkdown(text) {
   // Links (only http/https)
   s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, url) => {
     if (/^https?:\/\//i.test(url)) return `<a href="${url}" target="_blank" rel="noopener">${label}</a>`;
+    if (/^obsidian:\/\//i.test(url)) return `<a href="${url}">${label}</a>`;
     return `${label} (${url})`;
   });
 
