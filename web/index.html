@@ -534,7 +534,7 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
   align-items: flex-end;
   gap: 6px;
 }
-.input-top { align-self: flex-end; }
+.input-top { align-self: flex-end; display: flex; gap: 2px; }
 #voice-btn { width: 46px; height: 46px; }
 #voice-btn svg { width: 22px; height: 22px; }
 .input-bubble {
@@ -722,7 +722,10 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
 </div>
 
 <script>
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
+if ('serviceWorker' in navigator && !window.__TAURI__) navigator.serviceWorker.register('/sw.js');
+
+// ─── Server URL (configurable for Tauri desktop app) ───
+const serverOrigin = localStorage.getItem('nanoclaw_server') || location.origin;
 
 // ─── Theme ───
 const THEME_ICONS = {
@@ -787,8 +790,8 @@ function toast(msg, ms = 2000) {
 }
 
 function connectWs() {
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(`${proto}//${location.host}/ws?token=${encodeURIComponent(token)}`);
+  const wsUrl = serverOrigin.replace(/^http/, 'ws') + `/ws?token=${encodeURIComponent(token)}`;
+  ws = new WebSocket(wsUrl);
 
   ws.onopen = () => {
     statusTextEl.textContent = 'Connected';
