@@ -602,6 +602,58 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
 #send-btn:disabled:hover { background: transparent; color: var(--text-muted); }
 .icon-btn-sm { width: 30px; height: 30px; }
 
+/* ─── Image preview strip ─── */
+.image-preview {
+  width: 100%;
+  display: none;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 0;
+}
+.image-preview.has-images { display: flex; }
+.image-preview-item {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+}
+.image-preview-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.image-preview-item .remove-img {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0,0,0,0.5);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* ─── Chat images ─── */
+.chat-image {
+  max-width: 300px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: block;
+  margin: 4px 0;
+}
+.input-bubble.drag-over {
+  border-color: var(--accent);
+  background: var(--surface-hover);
+}
+
 /* ─── Mobile ─── */
 @media (max-width: 600px) {
   #input-bar {
@@ -647,7 +699,9 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
   <div id="typing"></div>
   <button id="scroll-btn" onclick="scrollToBottom()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
   <div id="input-bar">
-    <div class="input-top"><button class="icon-btn" id="voice-btn" title="Record voice (Ctrl+Shift+V)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="1" width="6" height="11" rx="3"/><path d="M19 10v1a7 7 0 01-14 0v-1"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button></div>
+    <div class="input-top"><button class="icon-btn" id="attach-btn" title="Attach images"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg></button><button class="icon-btn" id="voice-btn" title="Record voice (Ctrl+Shift+V)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="1" width="6" height="11" rx="3"/><path d="M19 10v1a7 7 0 01-14 0v-1"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button></div>
+    <input type="file" id="file-input" accept="image/*" multiple hidden>
+    <div id="image-preview" class="image-preview"></div>
     <div class="input-bubble">
       <textarea id="text-input" rows="1" placeholder="Reply..." autocomplete="off"></textarea>
       <button class="icon-btn" id="send-btn" title="Send" disabled><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg></button>
@@ -693,6 +747,10 @@ const messagesEl = $('messages');
 const textInput = $('text-input');
 const sendBtn = $('send-btn');
 const voiceBtn = $('voice-btn');
+const attachBtn = $('attach-btn');
+const fileInput = $('file-input');
+const imagePreview = $('image-preview');
+const pendingImages = []; // {file: File, objectUrl: string}
 const statusTextEl = $('status-text');
 const typingEl = $('typing');
 const scrollBtn = $('scroll-btn');
@@ -1015,6 +1073,12 @@ function renderMarkdown(text) {
   // Restore code blocks (after <br> conversion so newlines in code are preserved)
   s = s.replace(/\x00CB(\d+)\x00/g, (_, i) => codeBlocks[i]);
 
+  // Render [Photo: media/...] as inline images
+  s = s.replace(/\[Photo: (media\/[^\]]+)\]/g, (_, p) => {
+    const src = `/media/${p.slice('media/'.length)}?token=${encodeURIComponent(token)}`;
+    return `<a href="${src}" target="_blank"><img class="chat-image" src="${src}" loading="lazy"></a>`;
+  });
+
   return s;
 }
 
@@ -1091,18 +1155,103 @@ messagesEl.addEventListener('scroll', () => {
   scrollBtn.style.display = autoScroll ? 'none' : 'flex';
 });
 
-function send() {
+async function send() {
   const text = textInput.value.trim();
-  if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(JSON.stringify({ type: 'message', text }));
+  const hasImages = pendingImages.length > 0;
+  if ((!text && !hasImages) || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+  let fullText = '';
+
+  // Upload images first
+  if (hasImages) {
+    const paths = [];
+    for (const item of pendingImages) {
+      try {
+        const res = await fetch('/api/upload', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': item.file.type,
+          },
+          body: item.file,
+        });
+        if (res.ok) {
+          const data = await res.json();
+          paths.push(data.path);
+        }
+      } catch (err) { console.error('Upload failed:', err); }
+    }
+    fullText = paths.map(p => `[Photo: ${p}]`).join('\n');
+    clearImagePreviews();
+  }
+
+  if (text) fullText = fullText ? fullText + '\n' + text : text;
+  if (!fullText) return;
+
+  ws.send(JSON.stringify({ type: 'message', text: fullText }));
   textInput.value = '';
   textInput.style.height = 'auto';
+  textInput.classList.remove('has-text');
   sendBtn.disabled = true;
   activityLog = []; // Reset for next response
 }
 
 sendBtn.addEventListener('click', send);
 
+// --- Image handling ---
+function addImageFiles(files) {
+  for (const file of files) {
+    if (!file.type.startsWith('image/')) continue;
+    const objectUrl = URL.createObjectURL(file);
+    pendingImages.push({ file, objectUrl });
+    const item = document.createElement('div');
+    item.className = 'image-preview-item';
+    item.innerHTML = `<img src="${objectUrl}"><button class="remove-img">&times;</button>`;
+    item.querySelector('.remove-img').addEventListener('click', () => {
+      const idx = pendingImages.findIndex(p => p.objectUrl === objectUrl);
+      if (idx !== -1) { URL.revokeObjectURL(objectUrl); pendingImages.splice(idx, 1); }
+      item.remove();
+      updateImagePreview();
+    });
+    imagePreview.appendChild(item);
+  }
+  updateImagePreview();
+}
+
+function updateImagePreview() {
+  imagePreview.classList.toggle('has-images', pendingImages.length > 0);
+  sendBtn.disabled = !textInput.value.trim() && pendingImages.length === 0;
+}
+
+function clearImagePreviews() {
+  pendingImages.forEach(p => URL.revokeObjectURL(p.objectUrl));
+  pendingImages.length = 0;
+  imagePreview.innerHTML = '';
+  imagePreview.classList.remove('has-images');
+}
+
+attachBtn.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => {
+  addImageFiles(fileInput.files);
+  fileInput.value = '';
+});
+
+// Paste support
+document.addEventListener('paste', (e) => {
+  const files = [...(e.clipboardData?.files || [])].filter(f => f.type.startsWith('image/'));
+  if (files.length) { e.preventDefault(); addImageFiles(files); }
+});
+
+// Drag and drop
+const bubble = document.querySelector('.input-bubble');
+bubble.addEventListener('dragover', (e) => { e.preventDefault(); bubble.classList.add('drag-over'); });
+bubble.addEventListener('dragleave', () => bubble.classList.remove('drag-over'));
+bubble.addEventListener('drop', (e) => {
+  e.preventDefault();
+  bubble.classList.remove('drag-over');
+  const files = [...(e.dataTransfer?.files || [])].filter(f => f.type.startsWith('image/'));
+  if (files.length) addImageFiles(files);
+});
 
 document.getElementById('theme-btn').addEventListener('click', () => {
   applyTheme(document.documentElement.className === 'dark' ? 'light' : 'dark');
@@ -1110,7 +1259,7 @@ document.getElementById('theme-btn').addEventListener('click', () => {
 
 textInput.addEventListener('input', () => {
   const hasText = !!textInput.value.trim();
-  sendBtn.disabled = !hasText;
+  sendBtn.disabled = !hasText && pendingImages.length === 0;
   textInput.classList.toggle('has-text', hasText);
   textInput.style.height = 'auto';
   textInput.style.height = textInput.scrollHeight + 'px';

@@ -3,7 +3,7 @@ import http from 'node:http';
 import path from 'path';
 import { WebSocket, WebSocketServer } from 'ws';
 
-import { ASSISTANT_NAME, WEB_PORT } from '../config.js';
+import { ASSISTANT_NAME, GROUPS_DIR, WEB_PORT } from '../config.js';
 import { ActivityEvent } from '../container-runner.js';
 import { getRecentMessages, storeMessage } from '../db.js';
 import { GroupQueue } from '../group-queue.js';
@@ -17,7 +17,21 @@ import {
   RegisteredGroup,
 } from '../types.js';
 
-const MAX_BODY_BYTES = 5 * 1024 * 1024; // 5MB
+const MAX_VOICE_BYTES = 5 * 1024 * 1024; // 5MB
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
+const MIME_TO_EXT: Record<string, string> = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+};
+const EXT_TO_MIME: Record<string, string> = {
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+};
 const STATIC_FILES: Record<string, string> = {
   '/manifest.json': 'application/manifest+json',
   '/icon.svg': 'image/svg+xml',
@@ -177,6 +191,16 @@ export class WebChannel implements Channel {
       return;
     }
 
+    if (req.method === 'POST' && url === '/api/upload') {
+      this.handleUpload(req, res);
+      return;
+    }
+
+    if (req.method === 'GET' && url?.startsWith('/media/')) {
+      this.serveMedia(req, res, url);
+      return;
+    }
+
     // Let WebSocket upgrade through; 404 everything else
     res.writeHead(404);
     res.end('Not found');
@@ -310,7 +334,7 @@ export class WebChannel implements Channel {
 
     for await (const chunk of req) {
       totalBytes += chunk.length;
-      if (totalBytes > MAX_BODY_BYTES) {
+      if (totalBytes > MAX_VOICE_BYTES) {
         res.writeHead(413);
         res.end('Too large');
         return;
@@ -368,5 +392,92 @@ export class WebChannel implements Channel {
     } catch (err) {
       logger.error({ err }, 'Web voice processing error');
     }
+  }
+
+  private async handleUpload(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<void> {
+    if (!this.checkAuth(req)) {
+      res.writeHead(401);
+      res.end('Unauthorized');
+      return;
+    }
+
+    const contentType = req.headers['content-type'] || '';
+    const ext = MIME_TO_EXT[contentType];
+    if (!ext) {
+      res.writeHead(400);
+      res.end('Unsupported image type');
+      return;
+    }
+
+    const chunks: Buffer[] = [];
+    let totalBytes = 0;
+
+    for await (const chunk of req) {
+      totalBytes += chunk.length;
+      if (totalBytes > MAX_IMAGE_BYTES) {
+        res.writeHead(413);
+        res.end('Too large');
+        return;
+      }
+      chunks.push(chunk);
+    }
+
+    const buffer = Buffer.concat(chunks);
+    if (buffer.length === 0) {
+      res.writeHead(400);
+      res.end('Empty body');
+      return;
+    }
+
+    const mediaDir = path.join(GROUPS_DIR, WEB_GROUP_FOLDER, 'media');
+    fs.mkdirSync(mediaDir, { recursive: true });
+
+    const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}${ext}`;
+    fs.writeFileSync(path.join(mediaDir, filename), buffer);
+
+    const mediaPath = `media/${filename}`;
+    logger.info({ mediaPath, bytes: buffer.length }, 'Web image uploaded');
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ path: mediaPath }));
+  }
+
+  private serveMedia(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: string,
+  ): void {
+    if (!this.checkAuth(req)) {
+      res.writeHead(401);
+      res.end('Unauthorized');
+      return;
+    }
+
+    const filename = path.basename(url.slice('/media/'.length));
+    if (!filename || filename.includes('..')) {
+      res.writeHead(400);
+      res.end('Bad request');
+      return;
+    }
+
+    const filePath = path.join(GROUPS_DIR, WEB_GROUP_FOLDER, 'media', filename);
+    if (!fs.existsSync(filePath)) {
+      res.writeHead(404);
+      res.end('Not found');
+      return;
+    }
+
+    const ext = path.extname(filename).toLowerCase();
+    const mime = EXT_TO_MIME[ext] || 'application/octet-stream';
+
+    const data = fs.readFileSync(filePath);
+    res.writeHead(200, {
+      'Content-Type': mime,
+      'Cache-Control': 'public, max-age=86400',
+    });
+    res.end(data);
   }
 }
