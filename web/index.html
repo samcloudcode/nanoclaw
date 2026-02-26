@@ -536,9 +536,9 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
   flex-shrink: 0;
   background: var(--bg);
 }
-.input-top { align-self: flex-end; display: flex; gap: 2px; }
-#voice-btn { width: 46px; height: 46px; }
-#voice-btn svg { width: 22px; height: 22px; }
+.input-top { align-self: flex-end; display: flex; gap: 2px; align-items: center; }
+#voice-btn, #attach-btn { width: 46px; height: 46px; }
+#voice-btn svg, #attach-btn svg { width: 22px; height: 22px; }
 .input-bubble {
   width: 100%;
   display: flex;
@@ -1172,6 +1172,30 @@ messagesEl.addEventListener('scroll', () => {
   scrollBtn.style.display = autoScroll ? 'none' : 'flex';
 });
 
+async function compressImage(file) {
+  const MAX_PX = 1920;
+  const QUALITY = 0.85;
+  const outType = 'image/webp';
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+      if (width > MAX_PX || height > MAX_PX) {
+        if (width > height) { height = Math.round(height * MAX_PX / width); width = MAX_PX; }
+        else { width = Math.round(width * MAX_PX / height); height = MAX_PX; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+      canvas.toBlob((blob) => resolve(blob || file), outType, QUALITY);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+}
+
 let isSending = false;
 async function send() {
   const text = textInput.value.trim();
@@ -1190,13 +1214,14 @@ async function send() {
     const paths = [];
     for (const item of pendingImages) {
       try {
+        const compressed = await compressImage(item.file);
         const res = await fetch(`${serverOrigin}/api/upload`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
-            'Content-Type': item.file.type,
+            'Content-Type': compressed.type || item.file.type,
           },
-          body: item.file,
+          body: compressed,
         });
         if (res.ok) {
           const data = await res.json();
