@@ -63,6 +63,8 @@ async function transcribeWithOpenAI(
         file: file,
         model: config.openai.model || 'gpt-4o-transcribe',
         response_format: 'text',
+        language: 'en',
+        prompt: 'British English speaker. Use UK English spellings: colour, favourite, organise, realise, centre, defence, etc.',
       });
 
       // When response_format is 'text', the API returns a plain string
