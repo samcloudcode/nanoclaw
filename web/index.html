@@ -530,13 +530,16 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
   margin: 0 auto;
   padding: 8px 24px 12px;
   display: flex;
+  flex-direction: column;
   align-items: flex-end;
+  gap: 4px;
 }
+.input-top { align-self: flex-end; }
 .input-bubble {
-  flex: 1;
+  width: 100%;
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
-  gap: 2px;
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
@@ -549,7 +552,8 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
   box-shadow: 0 1px 4px rgba(0,0,0,0.04), 0 0 0 3px var(--accent-dim);
 }
 #text-input {
-  flex: 1;
+  flex: 1 1 100%;
+  min-width: 0;
   background: transparent;
   border: none;
   color: var(--text);
@@ -563,7 +567,7 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
   overflow-y: auto;
 }
 #text-input::placeholder { color: var(--text-muted); }
-.input-actions { display: flex; gap: 2px; align-items: flex-end; flex-shrink: 0; }
+#send-btn { margin-left: auto; }
 
 .icon-btn {
   width: 38px;
@@ -605,9 +609,8 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
     border-radius: 20px;
     padding: 2px 4px 2px 14px;
   }
-  #text-input {
-    font-size: 16px;
-  }
+  #text-input { font-size: 16px; }
+  .input-top { margin-right: 4px; }
   .msg.me { padding: 8px 12px; }
   .msg.them { padding: 12px 12px 4px; }
   .msg.me .msg-body { max-width: 85%; }
@@ -641,9 +644,10 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
   <div id="typing"></div>
   <button id="scroll-btn" onclick="scrollToBottom()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
   <div id="input-bar">
+    <div class="input-top"><button class="icon-btn" id="voice-btn" title="Record voice (Ctrl+Shift+V)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="1" width="6" height="11" rx="3"/><path d="M19 10v1a7 7 0 01-14 0v-1"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button></div>
     <div class="input-bubble">
       <textarea id="text-input" rows="1" placeholder="Reply..." autocomplete="off"></textarea>
-      <div class="input-actions"><button class="icon-btn" id="voice-btn" title="Record voice (Ctrl+Shift+V)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="1" width="6" height="11" rx="3"/><path d="M19 10v1a7 7 0 01-14 0v-1"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button><button class="icon-btn" id="send-btn" title="Send" disabled><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg></button></div>
+      <button class="icon-btn" id="send-btn" title="Send" disabled><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg></button>
     </div>
   </div>
 </div>
