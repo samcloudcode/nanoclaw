@@ -524,17 +524,22 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
 #scroll-btn:hover { color: var(--text); border-color: var(--accent); }
 
 /* ─── Input bar ─── */
+#input-wrap {
+  flex-shrink: 0;
+  background: var(--bg);
+  padding-top: 16px;
+  mask-image: linear-gradient(to bottom, transparent 0%, black 16px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 16px);
+}
 #input-bar {
   max-width: var(--max-w);
   width: 100%;
   margin: 0 auto;
-  padding: 6px 24px 8px;
+  padding: 0 24px 8px;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 4px;
-  flex-shrink: 0;
-  background: var(--bg);
 }
 .input-top { align-self: flex-end; display: flex; gap: 2px; align-items: center; }
 #voice-btn, #attach-btn { width: 46px; height: 46px; }
@@ -671,9 +676,10 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
 /* ─── Mobile ─── */
 @media (max-width: 600px) {
   #input-bar {
-    padding: 6px 12px;
+    padding: 0 12px;
     padding-bottom: max(6px, env(safe-area-inset-bottom));
   }
+  #input-wrap { padding-top: 12px; }
   .input-bubble {
     border-radius: 20px;
     padding: 2px 4px 2px 14px;
@@ -712,6 +718,7 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
   <div id="messages"></div>
   <div id="typing"></div>
   <button id="scroll-btn" onclick="scrollToBottom()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
+  <div id="input-wrap">
   <div id="input-bar">
     <div class="input-top"><button class="icon-btn" id="attach-btn" title="Attach images"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg></button><button class="icon-btn" id="voice-btn" title="Record voice (Ctrl+Shift+V)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="1" width="6" height="11" rx="3"/><path d="M19 10v1a7 7 0 01-14 0v-1"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button></div>
     <input type="file" id="file-input" accept="image/*" multiple hidden>
@@ -720,6 +727,7 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
       <textarea id="text-input" rows="1" placeholder="Reply..." autocomplete="off"></textarea>
       <button class="icon-btn" id="send-btn" title="Send" disabled><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg></button>
     </div>
+  </div>
   </div>
 </div>
 
