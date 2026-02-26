@@ -649,6 +649,17 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
   display: block;
   margin: 4px 0;
 }
+#send-btn.uploading {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.image-preview.uploading {
+  opacity: 0.5;
+  pointer-events: none;
+}
 .input-bubble.drag-over {
   border-color: var(--accent);
   background: var(--surface-hover);
@@ -1155,15 +1166,21 @@ messagesEl.addEventListener('scroll', () => {
   scrollBtn.style.display = autoScroll ? 'none' : 'flex';
 });
 
+let isSending = false;
 async function send() {
   const text = textInput.value.trim();
   const hasImages = pendingImages.length > 0;
-  if ((!text && !hasImages) || !ws || ws.readyState !== WebSocket.OPEN) return;
+  if (isSending || (!text && !hasImages) || !ws || ws.readyState !== WebSocket.OPEN) return;
 
   let fullText = '';
 
   // Upload images first
   if (hasImages) {
+    isSending = true;
+    sendBtn.disabled = true;
+    sendBtn.classList.add('uploading');
+    imagePreview.classList.add('uploading');
+
     const paths = [];
     for (const item of pendingImages) {
       try {
@@ -1183,6 +1200,9 @@ async function send() {
     }
     fullText = paths.map(p => `[Photo: ${p}]`).join('\n');
     clearImagePreviews();
+    sendBtn.classList.remove('uploading');
+    imagePreview.classList.remove('uploading');
+    isSending = false;
   }
 
   if (text) fullText = fullText ? fullText + '\n' + text : text;
