@@ -96,6 +96,7 @@ Guidelines:
 - Use Obsidian-compatible YAML frontmatter where useful (date, tags)
 - Use `[[wikilinks]]` to link between notes — Obsidian resolves them
 - Do NOT modify the `.obsidian/` directory (plugins, themes, settings)
+- When referencing vault notes in responses, use clickable Obsidian links: `[Note Name](obsidian://open?vault=Life&file=path/to/note)` (no .md extension, spaces as %20)
 
 ---
 

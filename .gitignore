@@ -34,3 +34,8 @@ groups/global/*
 .nanoclaw/
 
 agents-sdk-docs
+
+# Local files
+*.db
+alternative_setup_instructions.md
+desktop/

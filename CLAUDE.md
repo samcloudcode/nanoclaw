@@ -39,6 +39,8 @@ Group CLAUDE.md files are mounted as **single-file overlays** from vault. Agent 
 
 Fallback: if vault paths don't exist, falls back to `container/skills/` and `groups/` in the repo.
 
+**Important:** When editing group CLAUDE.md or skill .md files, always edit the **vault copy** (`~/Documents/Life/NanoClaw/`), not the git repo copy (`groups/` or `container/skills/`). The vault is the source of truth — the git copies are outdated.
+
 ### Vault structure
 ```
 ~/Documents/Life/NanoClaw/
