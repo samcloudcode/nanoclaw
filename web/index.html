@@ -594,27 +594,69 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
 #send-btn:disabled:hover { background: transparent; color: var(--text-muted); }
 .icon-btn-sm { width: 30px; height: 30px; }
 
+/* ─── Mobile-only elements (hidden on desktop) ─── */
+.mobile-send { display: none !important; }
+.mobile-mic { display: none !important; }
+
 /* ─── Mobile ─── */
 @media (max-width: 600px) {
   #input-bar {
-    padding: 6px 12px 10px;
-    padding-bottom: max(10px, env(safe-area-inset-bottom));
-    flex-direction: column;
-    align-items: stretch;
-    gap: 6px;
+    padding: 6px 12px;
+    padding-bottom: max(6px, env(safe-area-inset-bottom));
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto;
+    gap: 8px;
+    align-items: flex-end;
   }
-  #input-wrap { width: 100%; }
-  #text-input { font-size: 16px; padding: 10px 14px; border-radius: 16px; }
-  .input-actions {
+  #text-input {
+    grid-column: 1;
+    grid-row: 1;
+    font-size: 16px;
+    padding: 10px 14px;
+    border-radius: 16px;
+  }
+  .mobile-send {
+    display: flex !important;
+    grid-column: 2;
+    grid-row: 1;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    border: none;
+    background: transparent;
+    color: var(--accent);
+    cursor: pointer;
+    align-items: center;
     justify-content: center;
-    gap: 12px;
+    flex-shrink: 0;
+    transition: all 0.15s;
   }
-  .input-actions .icon-btn {
-    width: 42px;
-    height: 42px;
+  .mobile-send:disabled { color: var(--text-muted); cursor: default; }
+  .input-actions { display: none !important; }
+  .mobile-mic {
+    display: flex !important;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: center;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    border: 2px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--text-secondary);
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+    margin-bottom: 2px;
   }
-  #voice-btn { order: 0; }
-  #send-btn { order: 1; }
+  .mobile-mic:active { background: var(--surface-hover); }
+  .mobile-mic.recording {
+    border-color: var(--danger);
+    color: var(--danger);
+    animation: recPulse 1.5s ease-in-out infinite;
+  }
   .msg.me { padding: 8px 12px; }
   .msg.them { padding: 12px 12px 4px; }
   .msg.me .msg-body { max-width: 85%; }
@@ -649,7 +691,9 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
   <button id="scroll-btn" onclick="scrollToBottom()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
   <div id="input-bar">
     <textarea id="text-input" rows="1" placeholder="Reply..." autocomplete="off"></textarea>
+    <button class="mobile-send" id="mobile-send-btn" title="Send" disabled><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg></button>
     <div class="input-actions"><button class="icon-btn" id="voice-btn" title="Hold to record (or Ctrl+Shift+V)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="1" width="6" height="11" rx="3"/><path d="M19 10v1a7 7 0 01-14 0v-1"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button><button class="icon-btn" id="send-btn" title="Send" disabled><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg></button></div>
+    <button class="mobile-mic" id="mobile-mic-btn" title="Record voice"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="1" width="6" height="11" rx="3"/><path d="M19 10v1a7 7 0 01-14 0v-1"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button>
   </div>
 </div>
 
@@ -1100,6 +1144,21 @@ function send() {
 
 sendBtn.addEventListener('click', send);
 
+// Mobile buttons
+const mobileSendBtn = $('mobile-send-btn');
+const mobileMicBtn = $('mobile-mic-btn');
+if (mobileSendBtn) mobileSendBtn.addEventListener('click', send);
+if (mobileMicBtn) {
+  mobileMicBtn.addEventListener('click', () => {
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+      stopRecording();
+      mobileMicBtn.classList.remove('recording');
+    } else {
+      startRecording();
+      mobileMicBtn.classList.add('recording');
+    }
+  });
+}
 
 document.getElementById('theme-btn').addEventListener('click', () => {
   applyTheme(document.documentElement.className === 'dark' ? 'light' : 'dark');
@@ -1107,6 +1166,7 @@ document.getElementById('theme-btn').addEventListener('click', () => {
 
 textInput.addEventListener('input', () => {
   sendBtn.disabled = !textInput.value.trim();
+  if (mobileSendBtn) mobileSendBtn.disabled = sendBtn.disabled;
   textInput.style.height = 'auto';
   textInput.style.height = textInput.scrollHeight + 'px';
   const inputBar = $('input-bar');
@@ -1151,6 +1211,7 @@ function stopRecording() {
   if (!mediaRecorder || mediaRecorder.state !== 'recording') return;
   mediaRecorder.stop();
   voiceBtn.classList.remove('recording');
+  if (mobileMicBtn) mobileMicBtn.classList.remove('recording');
   mediaRecorder.onstop = async () => {
     const duration = Date.now() - recordingStart;
     if (duration < 500) { cleanup(); return; }
