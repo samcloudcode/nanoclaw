@@ -7,6 +7,7 @@ import makeWASocket, {
   DisconnectReason,
   WAMessage,
   WASocket,
+  fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   proto,
   useMultiFileAuthState,
@@ -67,7 +68,12 @@ export class WhatsAppChannel implements Channel {
 
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
+    const { version } = await fetchLatestWaWebVersion({}).catch((err) => {
+      logger.warn({ err }, 'Failed to fetch latest WA Web version, using default');
+      return { version: undefined };
+    });
     this.sock = makeWASocket({
+      version,
       auth: {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, logger),
@@ -226,6 +232,9 @@ export class WhatsAppChannel implements Channel {
               msg.message?.videoMessage?.caption ||
               '';
           }
+
+          // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
+          if (!content) continue;
 
           const sender = msg.key.participant || msg.key.remoteJid || '';
           const senderName = msg.pushName || sender.split('@')[0];

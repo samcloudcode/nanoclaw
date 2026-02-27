@@ -14,6 +14,9 @@ vi.mock('./config.js', () => ({
   DATA_DIR: '/tmp/nanoclaw-test-data',
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
   IDLE_TIMEOUT: 1800000, // 30min
+  TIMEZONE: 'America/Los_Angeles',
+  VAULT_GROUPS_DIR: '/tmp/nanoclaw-test-vault/groups',
+  VAULT_SKILLS_DIR: '/tmp/nanoclaw-test-vault/skills',
 }));
 
 // Mock logger

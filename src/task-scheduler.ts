@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 
 import {
+  ASSISTANT_NAME,
   GROUPS_DIR,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
@@ -11,11 +12,13 @@ import {
   TIMEZONE,
 } from './config.js';
 import { ContainerOutput, runContainerAgent, writeTasksSnapshot } from './container-runner.js';
+import { isValidGroupFolder } from './group-folder.js';
 import {
   getAllTasks,
   getDueTasks,
   getTaskById,
   logTaskRun,
+  updateTask,
   updateTaskAfterRun,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
@@ -35,6 +38,13 @@ async function runTask(
   deps: SchedulerDependencies,
 ): Promise<void> {
   const startTime = Date.now();
+
+  if (!isValidGroupFolder(task.group_folder)) {
+    logger.error({ taskId: task.id, groupFolder: task.group_folder }, 'Invalid group folder, pausing task');
+    updateTask(task.id, { status: 'paused' });
+    return;
+  }
+
   const groupDir = path.join(GROUPS_DIR, task.group_folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
@@ -111,6 +121,7 @@ async function runTask(
         chatJid: task.chat_jid,
         isMain,
         isScheduledTask: true,
+        assistantName: ASSISTANT_NAME,
       },
       (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {
@@ -120,6 +131,9 @@ async function runTask(
           await deps.sendMessage(task.chat_jid, streamedOutput.result);
           // Only reset idle timer on actual results, not session-update markers
           resetIdleTimer();
+        }
+        if (!streamedOutput.result && streamedOutput.status === 'success') {
+          deps.queue.notifyIdle(task.chat_jid);
         }
         if (streamedOutput.status === 'error') {
           error = streamedOutput.error || 'Unknown error';

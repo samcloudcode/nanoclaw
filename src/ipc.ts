@@ -11,6 +11,7 @@ import {
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getMessagesForChat, getOldestMessage, getPersonalContacts, getTaskById, updateTask } from './db.js';
+import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
@@ -209,6 +210,11 @@ export async function processTaskIpc(
         }
 
         const targetFolder = targetGroupEntry.folder;
+
+        if (!isValidGroupFolder(targetFolder)) {
+          logger.warn({ targetFolder }, 'Invalid group folder in schedule_task');
+          break;
+        }
 
         // Authorization: non-main groups can only schedule for themselves
         if (!isMain && targetFolder !== sourceGroup) {
