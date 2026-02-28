@@ -312,9 +312,6 @@ html, body {
 
 /* ─── Live activity indicator ─── */
 #typing {
-  max-width: var(--max-w);
-  width: 100%;
-  margin: 0 auto;
   padding: 0 24px;
   font-family: var(--font-ui);
   font-size: 12.5px;
@@ -325,8 +322,9 @@ html, body {
   max-height: 0;
 }
 #typing:not(:empty) {
-  padding: 4px 24px;
-  max-height: 40px;
+  padding: 4px 24px 8px;
+  max-height: none;
+  overflow: visible;
 }
 #typing:not(:empty)::before {
   content: '';
@@ -532,9 +530,7 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
 #input-wrap {
   flex-shrink: 0;
   background: var(--bg);
-  padding-top: 6px;
-  mask-image: linear-gradient(to bottom, transparent 0%, black 6px);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 6px);
+  padding-top: 2px;
 }
 #input-bar {
   max-width: var(--max-w);
@@ -721,8 +717,7 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
     </div>
   </div>
   <div id="toast"></div>
-  <div id="messages"></div>
-  <div id="typing"></div>
+  <div id="messages"><div id="typing"></div></div>
   <button id="scroll-btn" onclick="scrollToBottom()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
   <div id="input-wrap">
   <div id="input-bar">
@@ -887,13 +882,24 @@ function insertActivityLog(steps) {
 
   wrapper.appendChild(toggle);
   wrapper.appendChild(stepsEl);
-  messagesEl.appendChild(wrapper);
+  messagesEl.insertBefore(wrapper, typingEl);
 }
 
 function renderHistory(messages) {
   messagesEl.innerHTML = '';
   lastSender = null;
-  for (const m of messages) appendMessage(m, false);
+  // Re-attach typing indicator first so insertBefore(el, typingEl) works
+  messagesEl.appendChild(typingEl);
+  for (const m of messages) {
+    if (m.type === 'activity_log') {
+      const steps = m.events
+        .map(e => formatActivity(e))
+        .filter(Boolean);
+      if (steps.length > 0) insertActivityLog(steps);
+    } else {
+      appendMessage(m, false);
+    }
+  }
   scrollToBottom();
 }
 
@@ -931,7 +937,7 @@ function appendMessage(m, scroll = true) {
     div.appendChild(actions);
   }
 
-  messagesEl.appendChild(div);
+  messagesEl.insertBefore(div, typingEl);
   lastSender = side;
 
   if (isLive && side === 'them' && m.text.length > 20) {
@@ -1080,8 +1086,8 @@ function renderMarkdown(text) {
   // Links (only http/https)
   s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, url) => {
     if (/^https?:\/\//i.test(url)) return `<a href="${url}" target="_blank" rel="noopener">${label}</a>`;
-    if (/^obsidian:\/\//i.test(url)) return `<a href="${url}">${label}</a>`;
-    return `${label} (${url})`;
+    if (/^obsidian:\/\//i.test(url)) return `<a href="${url}" target="_blank" rel="noopener">${label}</a>`;
+    return `<a href="${url}" target="_blank" rel="noopener">${label}</a>`;
   });
 
   // Bare URLs
@@ -1151,6 +1157,7 @@ function showTyping(isTyping) {
     return;
   }
   if (!typingEl.textContent) typingEl.textContent = 'Thinking...';
+  if (autoScroll) scrollToBottom();
 }
 
 function showActivity(event) {
@@ -1160,6 +1167,7 @@ function showActivity(event) {
   typingEl.classList.remove('fade-in');
   void typingEl.offsetWidth;
   typingEl.classList.add('fade-in');
+  if (autoScroll) scrollToBottom();
   if (activityTimeout) clearTimeout(activityTimeout);
   activityTimeout = setTimeout(() => { typingEl.textContent = ''; }, 15000);
 }
@@ -1185,7 +1193,7 @@ function formatActivity(event) {
 }
 
 function scrollToBottom() {
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+  requestAnimationFrame(() => { messagesEl.scrollTop = messagesEl.scrollHeight; });
 }
 
 messagesEl.addEventListener('scroll', () => {
@@ -1405,6 +1413,17 @@ function stopRecording() {
 
 // ─── Tauri Desktop Integration ───
 if (window.__TAURI__) {
+  // Open external links in system browser instead of navigating the WebView
+  document.addEventListener('click', e => {
+    const a = e.target.closest('a[href]');
+    if (!a) return;
+    const url = a.href;
+    if (url && !url.startsWith('tauri://') && /^https?:|^obsidian:/i.test(url)) {
+      e.preventDefault();
+      window.open(url, '_blank');
+    }
+  }, true);
+
   // Suppress Super+I keydown so it doesn't type "i" into the input
   window.addEventListener('keydown', e => {
     if (e.metaKey && e.key === 'i') e.preventDefault();
@@ -1414,6 +1433,13 @@ if (window.__TAURI__) {
   window.__TAURI__.event.listen('toggle-voice', () => {
     if (mediaRecorder && mediaRecorder.state === 'recording') stopRecording();
     else startRecording();
+  });
+
+  // Show window when activated by second instance
+  window.__TAURI__.event.listen('show-window', async () => {
+    const win = window.__TAURI__.window.getCurrentWindow();
+    await win.show();
+    await win.setFocus();
   });
 }
 </script>
