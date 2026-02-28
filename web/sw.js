@@ -1,4 +1,4 @@
-const CACHE = 'sams-pa-v1';
+const CACHE = 'sams-pa-v2';
 const SHELL = ['/', '/manifest.json', '/icon.svg'];
 
 self.addEventListener('install', (e) => {

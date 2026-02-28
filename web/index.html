@@ -312,19 +312,19 @@ html, body {
 
 /* ─── Live activity indicator ─── */
 #typing {
-  padding: 0 24px;
   font-family: var(--font-ui);
   font-size: 12.5px;
   color: var(--text-muted);
   font-style: italic;
-  transition: opacity 0.2s;
-  overflow: hidden;
-  max-height: 0;
+  max-width: var(--max-w);
+  margin: 0 auto;
+  width: 100%;
+  padding: 0 24px;
+  box-sizing: border-box;
 }
+#typing:empty { display: none; }
 #typing:not(:empty) {
-  padding: 4px 24px 8px;
-  max-height: none;
-  overflow: visible;
+  padding: 8px 24px;
 }
 #typing:not(:empty)::before {
   content: '';
@@ -526,6 +526,36 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
 @keyframes scrollBtnIn { from { opacity: 0; transform: translateX(-50%) translateY(10px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
 #scroll-btn:hover { color: var(--text); border-color: var(--accent); }
 
+/* ─── Tauri custom title bar ─── */
+#titlebar {
+  display: none;
+  height: 32px;
+  background: var(--bg);
+  user-select: none;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 4px;
+}
+#titlebar .drag-region {
+  flex: 1;
+  height: 100%;
+}
+#titlebar button {
+  width: 36px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+#titlebar button:hover { background: var(--border); color: var(--text); }
+#titlebar button.close:hover { background: #e81123; color: white; }
+
 /* ─── Input bar ─── */
 #input-wrap {
   flex-shrink: 0;
@@ -604,6 +634,17 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
 @keyframes recPulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(220,38,38,0.2); }
   50% { box-shadow: 0 0 0 8px rgba(220,38,38,0); }
+}
+#voice-btn.processing {
+  color: var(--accent);
+  background: rgba(99,102,241,0.12);
+  animation: procPulse 1.2s ease-in-out infinite;
+  pointer-events: none;
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.15);
+}
+@keyframes procPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(99,102,241,0.2); }
+  50% { box-shadow: 0 0 0 8px rgba(99,102,241,0); }
 }
 #send-btn { color: var(--accent); }
 #send-btn:disabled { color: var(--text-muted); cursor: default; }
@@ -709,6 +750,13 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
   <p id="auth-error" style="color:#c0392b;font-size:13px;margin-top:8px;display:none"></p>
 </div>
 
+<div id="titlebar">
+  <div class="drag-region" data-tauri-drag-region></div>
+  <button id="tb-min" title="Minimize"><svg width="12" height="12" viewBox="0 0 12 12"><rect y="5" width="12" height="1.5" fill="currentColor"/></svg></button>
+  <button id="tb-max" title="Maximize"><svg width="12" height="12" viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
+  <button id="tb-close" class="close" title="Close"><svg width="12" height="12" viewBox="0 0 12 12"><line x1="1" y1="1" x2="11" y2="11" stroke="currentColor" stroke-width="1.5"/><line x1="11" y1="1" x2="1" y2="11" stroke="currentColor" stroke-width="1.5"/></svg></button>
+</div>
+
 <div id="chat">
   <div id="header">
     <div id="status-text"></div>
@@ -717,8 +765,9 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
     </div>
   </div>
   <div id="toast"></div>
-  <div id="messages"><div id="typing"></div></div>
+  <div id="messages"></div>
   <button id="scroll-btn" onclick="scrollToBottom()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
+  <div id="typing"></div>
   <div id="input-wrap">
   <div id="input-bar">
     <div class="input-top"><button class="icon-btn" id="attach-btn" title="Attach images"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg></button><button class="icon-btn" id="voice-btn" title="Record voice (Ctrl+Shift+R)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="1" width="6" height="11" rx="3"/><path d="M19 10v1a7 7 0 01-14 0v-1"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button></div>
@@ -882,14 +931,12 @@ function insertActivityLog(steps) {
 
   wrapper.appendChild(toggle);
   wrapper.appendChild(stepsEl);
-  messagesEl.insertBefore(wrapper, typingEl);
+  messagesEl.appendChild(wrapper);
 }
 
 function renderHistory(messages) {
   messagesEl.innerHTML = '';
   lastSender = null;
-  // Re-attach typing indicator first so insertBefore(el, typingEl) works
-  messagesEl.appendChild(typingEl);
   for (const m of messages) {
     if (m.type === 'activity_log') {
       const steps = m.events
@@ -937,7 +984,7 @@ function appendMessage(m, scroll = true) {
     div.appendChild(actions);
   }
 
-  messagesEl.insertBefore(div, typingEl);
+  messagesEl.appendChild(div);
   lastSender = side;
 
   if (isLive && side === 'them' && m.text.length > 20) {
@@ -1086,7 +1133,7 @@ function renderMarkdown(text) {
   // Links (only http/https)
   s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, url) => {
     if (/^https?:\/\//i.test(url)) return `<a href="${url}" target="_blank" rel="noopener">${label}</a>`;
-    if (/^obsidian:\/\//i.test(url)) return `<a href="${url}" target="_blank" rel="noopener">${label}</a>`;
+    if (/^obsidian:\/\//i.test(url)) return `<a href="${url}" class="obsidian-link">${label}</a>`;
     return `<a href="${url}" target="_blank" rel="noopener">${label}</a>`;
   });
 
@@ -1400,13 +1447,22 @@ function stopRecording() {
     if (duration < 500) { voiceChunks = []; return; }
     const blob = new Blob(voiceChunks, { type: 'audio/webm' });
     voiceChunks = [];
+    voiceBtn.classList.add('processing');
+    typingEl.textContent = 'Processing audio...';
+    if (autoScroll) scrollToBottom();
     try {
-      await fetch(`${serverOrigin}/api/voice`, {
+      const res = await fetch(`${serverOrigin}/api/voice`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         body: blob,
       });
-    } catch (err) { console.error('Voice upload failed:', err); }
+      if (!res.ok) throw new Error(`Server error (${res.status})`);
+    } catch (err) {
+      console.error('Voice upload failed:', err);
+      toast('Voice processing failed — try again', 3000);
+    }
+    voiceBtn.classList.remove('processing');
+    if (typingEl.textContent === 'Processing audio...') typingEl.textContent = '';
   };
   mr.stop();
 }
@@ -1414,11 +1470,18 @@ function stopRecording() {
 // ─── Tauri Desktop Integration ───
 if (window.__TAURI__) {
   // Open external links in system browser instead of navigating the WebView
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
   document.addEventListener('click', e => {
     const a = e.target.closest('a[href]');
     if (!a) return;
     const url = a.href;
-    if (url && !url.startsWith('tauri://') && /^https?:|^obsidian:/i.test(url)) {
+    if (!url || url.startsWith('tauri://')) return;
+    // Obsidian links: on mobile, navigate directly (OS opens app); on desktop, new tab
+    if (/^obsidian:/i.test(url)) {
+      e.preventDefault();
+      if (isMobile) window.location.href = url;
+      else window.open(url, '_blank');
+    } else if (/^https?:/i.test(url)) {
       e.preventDefault();
       window.open(url, '_blank');
     }
@@ -1435,12 +1498,20 @@ if (window.__TAURI__) {
     else startRecording();
   });
 
-  // Show window when activated by second instance
+  // Restore window when activated by second instance
   window.__TAURI__.event.listen('show-window', async () => {
     const win = window.__TAURI__.window.getCurrentWindow();
-    await win.show();
+    await win.unminimize();
     await win.setFocus();
   });
+
+  // Custom title bar (native decorations disabled — WebKitGTK CSD buttons break on Wayland)
+  const titlebar = document.getElementById('titlebar');
+  titlebar.style.display = 'flex';
+  const win = window.__TAURI__.window.getCurrentWindow();
+  document.getElementById('tb-min').addEventListener('click', () => win.minimize());
+  document.getElementById('tb-max').addEventListener('click', () => win.toggleMaximize());
+  document.getElementById('tb-close').addEventListener('click', () => win.close());
 }
 </script>
 </body>
