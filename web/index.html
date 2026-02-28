@@ -709,7 +709,8 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
   </div>
   <p>Enter your access token to connect</p>
   <input id="token-input" type="password" placeholder="Access token" autocomplete="off">
-  <button onclick="authenticate()">Connect</button>
+  <button id="connect-btn">Connect</button>
+  <p id="auth-error" style="color:#c0392b;font-size:13px;margin-top:8px;display:none"></p>
 </div>
 
 <div id="chat">
@@ -725,7 +726,7 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
   <button id="scroll-btn" onclick="scrollToBottom()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
   <div id="input-wrap">
   <div id="input-bar">
-    <div class="input-top"><button class="icon-btn" id="attach-btn" title="Attach images"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg></button><button class="icon-btn" id="voice-btn" title="Record voice (Ctrl+Shift+V)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="1" width="6" height="11" rx="3"/><path d="M19 10v1a7 7 0 01-14 0v-1"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button></div>
+    <div class="input-top"><button class="icon-btn" id="attach-btn" title="Attach images"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg></button><button class="icon-btn" id="voice-btn" title="Record voice (Ctrl+Shift+R)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="1" width="6" height="11" rx="3"/><path d="M19 10v1a7 7 0 01-14 0v-1"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button></div>
     <input type="file" id="file-input" accept="image/*" multiple hidden>
     <div id="image-preview" class="image-preview"></div>
     <div class="input-bubble">
@@ -740,7 +741,8 @@ html.dark .msg code { background: rgba(255,255,255,0.07); }
 if ('serviceWorker' in navigator && !window.__TAURI__) navigator.serviceWorker.register('/sw.js');
 
 // ─── Server URL (configurable for Tauri desktop app) ───
-const serverOrigin = localStorage.getItem('nanoclaw_server') || location.origin;
+const serverOrigin = localStorage.getItem('nanoclaw_server')
+  || (window.__TAURI__ ? 'https://chat.life-ops.co' : location.origin);
 
 // ─── Theme ───
 const THEME_ICONS = {
@@ -786,11 +788,16 @@ const typingEl = $('typing');
 const scrollBtn = $('scroll-btn');
 const toastEl = $('toast');
 
+document.getElementById('connect-btn').addEventListener('click', authenticate);
+document.getElementById('token-input').addEventListener('keydown', e => { if (e.key === 'Enter') authenticate(); });
+
 if (token) authenticate();
 
 function authenticate() {
   token = $('token-input')?.value || token;
   if (!token) return;
+  const err = $('auth-error');
+  if (err) { err.textContent = `Connecting to ${serverOrigin}…`; err.style.display = 'block'; err.style.color = '#888'; }
   localStorage.setItem('nanoclaw_token', token);
   $('auth').style.display = 'none';
   $('chat').style.display = 'flex';
@@ -823,6 +830,8 @@ function connectWs() {
       localStorage.removeItem('nanoclaw_token');
       $('auth').style.display = 'flex';
       $('chat').style.display = 'none';
+      const err = $('auth-error');
+      if (err) { err.textContent = 'Invalid token. Please try again.'; err.style.display = 'block'; }
       return;
     }
     setTimeout(connectWs, reconnectDelay);
@@ -1335,11 +1344,15 @@ textInput.addEventListener('keydown', (e) => {
 
 // Voice
 let voiceChunks = [];
-voiceBtn.addEventListener('mousedown', startRecording);
-voiceBtn.addEventListener('mouseup', stopRecording);
-voiceBtn.addEventListener('mouseleave', stopRecording);
-voiceBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startRecording(); });
-voiceBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopRecording(); });
+voiceBtn.addEventListener('click', () => {
+  if (mediaRecorder && mediaRecorder.state === 'recording') stopRecording();
+  else startRecording();
+});
+voiceBtn.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  if (mediaRecorder && mediaRecorder.state === 'recording') stopRecording();
+  else startRecording();
+});
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'V' && e.ctrlKey && e.shiftKey) {
@@ -1348,6 +1361,10 @@ document.addEventListener('keydown', (e) => {
     else startRecording();
   }
 });
+
+function emitRecordingState(active) {
+  if (window.__TAURI__) window.__TAURI__.core.invoke('set_recording', { active });
+}
 
 async function startRecording() {
   if (mediaRecorder) return;
@@ -1359,17 +1376,22 @@ async function startRecording() {
     mediaRecorder.start();
     voiceBtn.classList.add('recording');
     recordingStart = Date.now();
+    emitRecordingState(true);
   } catch (err) { console.error('Mic access denied:', err); }
 }
 
 function stopRecording() {
   if (!mediaRecorder || mediaRecorder.state !== 'recording') return;
-  mediaRecorder.stop();
-  voiceBtn.classList.remove('recording');
-  mediaRecorder.onstop = async () => {
+  const mr = mediaRecorder;
+  voiceBtn?.classList.remove('recording');
+  emitRecordingState(false);
+  mr.onstop = async () => {
     const duration = Date.now() - recordingStart;
-    if (duration < 500) { cleanup(); return; }
+    if (mr.stream) mr.stream.getTracks().forEach(t => t.stop());
+    mediaRecorder = null;
+    if (duration < 500) { voiceChunks = []; return; }
     const blob = new Blob(voiceChunks, { type: 'audio/webm' });
+    voiceChunks = [];
     try {
       await fetch(`${serverOrigin}/api/voice`, {
         method: 'POST',
@@ -1377,31 +1399,22 @@ function stopRecording() {
         body: blob,
       });
     } catch (err) { console.error('Voice upload failed:', err); }
-    cleanup();
   };
-  function cleanup() {
-    if (mediaRecorder?.stream) mediaRecorder.stream.getTracks().forEach(t => t.stop());
-    mediaRecorder = null;
-    voiceChunks = [];
-  }
+  mr.stop();
 }
 
 // ─── Tauri Desktop Integration ───
 if (window.__TAURI__) {
+  // Suppress Super+I keydown so it doesn't type "i" into the input
+  window.addEventListener('keydown', e => {
+    if (e.metaKey && e.key === 'i') e.preventDefault();
+  }, true);
+
   // Listen for global shortcut voice toggle
   window.__TAURI__.event.listen('toggle-voice', () => {
     if (mediaRecorder && mediaRecorder.state === 'recording') stopRecording();
     else startRecording();
   });
-
-  // First-launch: prompt for server URL if not configured
-  if (!localStorage.getItem('nanoclaw_server')) {
-    const url = prompt('Enter your NanoClaw server URL:', 'https://chat.life-ops.co');
-    if (url) {
-      localStorage.setItem('nanoclaw_server', url.replace(/\/+$/, ''));
-      location.reload();
-    }
-  }
 }
 </script>
 </body>

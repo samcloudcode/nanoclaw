@@ -176,6 +176,17 @@ export class WebChannel implements Channel {
   ): void {
     const url = req.url?.split('?')[0];
 
+    // CORS headers for Tauri desktop app
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
     if (req.method === 'GET' && (url === '/' || url === '/index.html')) {
       this.serveHtml(res);
       return;

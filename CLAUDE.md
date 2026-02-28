@@ -107,6 +107,56 @@ ssh nanoclaw 'systemctl --user status nanoclaw'      # NanoClaw
 ssh nanoclaw 'systemctl --user status vncserver'      # VNC desktop
 ```
 
+## Desktop App (Tauri v2)
+
+Located in `desktop/`. Wraps `web/index.html` as a native desktop app with global voice hotkey. Product name: "Sam's PA". Installed via RPM as `sam-s-pa`.
+
+| File | Purpose |
+|------|---------|
+| `desktop/src-tauri/src/lib.rs` | Global shortcut, tray, `set_recording` command, mic permission |
+| `desktop/src-tauri/tauri.conf.json` | App config, two windows: `main` + `indicator` |
+| `desktop/src-tauri/capabilities/default.json` | Tauri permissions |
+| `web/indicator.html` | Floating recording indicator (dark pill, animated bars) |
+
+**Key details:**
+- Global shortcut: Ctrl+Shift+R (configurable via `~/.config/nanoclaw/desktop.json`)
+- Indicator shown/hidden via Tauri `invoke('set_recording', { active })` from frontend
+- Mic permission auto-granted via webkit2gtk `connect_permission_request`
+- Indicator window position on Wayland is compositor-controlled (GNOME places it centrally)
+- `src/channels/web.ts` has CORS headers on all responses (needed for cross-origin fetch from Tauri)
+- Server URL hardcoded for Tauri: `https://chat.life-ops.co` (falls back from `localStorage` → hardcoded default, not `location.origin` which is `tauri://localhost`)
+- `web/index.html` suppresses the shortcut key in a `keydown` listener to prevent typing characters into the input
+- `stopRecording()` assigns `onstop` before calling `.stop()` to prevent a race condition losing audio
+- Service worker is skipped in Tauri (`!window.__TAURI__`)
+- JS↔Rust IPC: use `invoke()` (JS→Rust commands), `app.emit()` (Rust→JS events). JS `emit()` does NOT reach Rust listeners in Tauri v2.
+
+**Build gotchas:**
+- PNG icons must be 8-bit RGBA: `magick icon.svg -background none -resize 32x32 -depth 8 -define png:color-type=6 icon.png`
+- Icons are embedded at compile time. After regenerating, `touch src-tauri/build.rs` to force recompile.
+- AppImage bundling fails on Fedora (linuxdeploy issue). Disabled via `"targets": ["rpm", "deb"]` in tauri.conf.json.
+- `CARGO_BUILD_JOBS=2` limits RAM usage during compilation.
+- `plugins` must be `"plugins": {}` (empty object), not `"plugins": { "global-shortcut": {} }` — the latter causes `invalid type: map, expected unit`.
+
+**Deploy server changes:**
+```bash
+npm run build && rsync -a dist/ nanoclaw:~/nanoclaw/dist/ && ssh nanoclaw 'systemctl --user restart nanoclaw'
+```
+
+**Build and install desktop app:**
+```bash
+cd desktop && CARGO_BUILD_JOBS=2 cargo tauri build && sudo dnf reinstall "src-tauri/target/release/bundle/rpm/Sam's PA-0.1.0-1.x86_64.rpm"
+```
+
+**Run desktop app locally (dev):**
+```bash
+cd desktop && CARGO_BUILD_JOBS=2 cargo tauri dev
+```
+
+**Autostart on login:**
+```bash
+cp "/usr/share/applications/Sam's PA.desktop" ~/.config/autostart/
+```
+
 ## Container Build Cache
 
 Docker buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps. To force a truly clean rebuild:
