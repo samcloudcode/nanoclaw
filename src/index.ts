@@ -17,7 +17,6 @@ import { TelegramChannel } from './channels/telegram.js';
 import { WebChannel } from './channels/web.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
-  ActivityEvent,
   ContainerOutput,
   runContainerAgent,
   writeGroupsSnapshot,
@@ -36,6 +35,7 @@ import {
   setRouterState,
   setSession,
   storeChatMetadata,
+  storeActivityLog,
   storeMessage,
 } from './db.js';
 import { assertValidGroupFolder } from './group-folder.js';
@@ -44,7 +44,7 @@ import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startVoiceServer } from './voice-server.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import { ActivityEvent, Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -181,14 +181,24 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
-  // Activity callback — forward to web channel if applicable
-  const onActivity = channel.name === 'web'
-    ? (event: ActivityEvent) => (channel as WebChannel).broadcastActivity(chatJid, event)
-    : undefined;
+  // Activity callback — collect events and forward to web channel
+  const collectedEvents: ActivityEvent[] = [];
+  const onActivity = (event: ActivityEvent) => {
+    collectedEvents.push(event);
+    if (channel.name === 'web') {
+      (channel as WebChannel).broadcastActivity(chatJid, event);
+    }
+  };
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {
+      // Flush collected activity events before the bot message
+      if (collectedEvents.length > 0) {
+        storeActivityLog(chatJid, [...collectedEvents], new Date().toISOString());
+        collectedEvents.length = 0;
+      }
+
       const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
       // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
@@ -212,6 +222,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
+
+  // Persist any remaining activity events (e.g. if container exited without final output)
+  if (collectedEvents.length > 0) {
+    storeActivityLog(chatJid, [...collectedEvents], new Date().toISOString());
+    collectedEvents.length = 0;
+  }
 
   if (output === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —

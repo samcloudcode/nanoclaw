@@ -67,6 +67,20 @@ export interface ScheduledTask {
   created_at: string;
 }
 
+export interface ActivityEvent {
+  type: 'activity';
+  event: string;
+  tool?: string;
+  input?: Record<string, unknown>;
+  durationMs?: number;
+  agentType?: string;
+}
+
+export interface ActivityLog {
+  events: ActivityEvent[];
+  timestamp: string;
+}
+
 export interface TaskRunLog {
   task_id: string;
   run_at: string;

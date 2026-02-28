@@ -184,7 +184,9 @@ export class WhatsAppChannel implements Channel {
 
         // Always notify about chat metadata for group discovery
         const isGroup = chatJid.endsWith('@g.us');
-        this.opts.onChatMetadata(chatJid, timestamp, undefined, 'whatsapp', isGroup);
+        // For 1:1 chats, use pushName as the contact name (groups get names via syncGroupMetadata)
+        const chatName = !isGroup && msg.pushName ? msg.pushName : undefined;
+        this.opts.onChatMetadata(chatJid, timestamp, chatName, 'whatsapp', isGroup);
 
         // Extract message content for registered groups and 1:1 chats
         const groups = this.opts.registeredGroups();

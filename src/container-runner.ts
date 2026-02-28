@@ -21,7 +21,7 @@ import {
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
 import { validateAdditionalMounts } from './mount-security.js';
-import { RegisteredGroup } from './types.js';
+import { ActivityEvent, RegisteredGroup } from './types.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -255,15 +255,6 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string): strin
   args.push(CONTAINER_IMAGE);
 
   return args;
-}
-
-export interface ActivityEvent {
-  type: 'activity';
-  event: string;
-  tool?: string;
-  input?: Record<string, unknown>;
-  durationMs?: number;
-  agentType?: string;
 }
 
 export async function runContainerAgent(

@@ -81,6 +81,20 @@ systemctl --user start nanoclaw      # Start
 journalctl --user -u nanoclaw -f     # Tail logs
 ```
 
+## Troubleshooting WhatsApp
+
+If WhatsApp isn't connecting, check these in order:
+
+1. **`TELEGRAM_ONLY=true` in `.env`** — disables WhatsApp entirely. Set to `false` and restart.
+2. **Auth expired (401 / "logged out")** — clear auth and re-scan QR:
+   ```bash
+   ssh nanoclaw 'rm -rf ~/nanoclaw/store/auth && mkdir -p ~/nanoclaw/store/auth'
+   ssh nanoclaw 'cd ~/nanoclaw && node wa-auth.mjs'  # shows QR in terminal
+   # Scan with WhatsApp → Settings → Linked Devices → Link a Device
+   systemctl --user restart nanoclaw
+   ```
+   The `wa-auth.mjs` script on the server handles QR display and reconnection. Baileys' `printQRInTerminal` option is deprecated and no longer works.
+
 ## Container Secrets & Environment
 
 Secrets from `.env` are passed to containers via stdin (never mounted as files). The allowlist lives in `readSecrets()` in `src/container-runner.ts`. To add a new secret, add its key there.

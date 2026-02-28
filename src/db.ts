@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
-import { NewMessage, RegisteredGroup, ScheduledTask, TaskRunLog } from './types.js';
+import { ActivityEvent, NewMessage, RegisteredGroup, ScheduledTask, TaskRunLog } from './types.js';
 
 let db: Database.Database;
 
@@ -66,6 +66,15 @@ function createSchema(database: Database.Database): void {
       group_folder TEXT PRIMARY KEY,
       session_id TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS activity_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_jid TEXT NOT NULL,
+      events TEXT NOT NULL,
+      timestamp TEXT NOT NULL,
+      FOREIGN KEY (chat_jid) REFERENCES chats(jid)
+    );
+    CREATE INDEX IF NOT EXISTS idx_activity_chat_ts ON activity_logs(chat_jid, timestamp);
+
     CREATE TABLE IF NOT EXISTS registered_groups (
       jid TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -399,6 +408,36 @@ export function getMessagesForChat(
        LIMIT ?`,
     )
     .all(chatJid, limit) as Array<{ sender_name: string; content: string; timestamp: string; is_from_me: number }>;
+}
+
+// --- Activity log accessors ---
+
+export function storeActivityLog(
+  chatJid: string,
+  events: ActivityEvent[],
+  timestamp: string,
+): void {
+  db.prepare(
+    `INSERT INTO activity_logs (chat_jid, events, timestamp) VALUES (?, ?, ?)`,
+  ).run(chatJid, JSON.stringify(events), timestamp);
+}
+
+export function getActivityLogs(
+  chatJid: string,
+  limit = 50,
+): Array<{ events: ActivityEvent[]; timestamp: string }> {
+  const rows = db
+    .prepare(
+      `SELECT events, timestamp FROM activity_logs
+       WHERE chat_jid = ?
+       ORDER BY timestamp DESC
+       LIMIT ?`,
+    )
+    .all(chatJid, limit) as Array<{ events: string; timestamp: string }>;
+  return rows.map((r) => ({
+    events: JSON.parse(r.events) as ActivityEvent[],
+    timestamp: r.timestamp,
+  }));
 }
 
 export function createTask(

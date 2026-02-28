@@ -4,8 +4,8 @@ import path from 'path';
 import { WebSocket, WebSocketServer } from 'ws';
 
 import { ASSISTANT_NAME, GROUPS_DIR, WEB_PORT } from '../config.js';
-import { ActivityEvent } from '../container-runner.js';
-import { getRecentMessages, storeMessage } from '../db.js';
+import { ActivityEvent } from '../types.js';
+import { getActivityLogs, getRecentMessages, storeMessage } from '../db.js';
 import { GroupQueue } from '../group-queue.js';
 import { logger } from '../logger.js';
 import { transcribeBuffer } from '../transcription.js';
@@ -266,18 +266,34 @@ export class WebChannel implements Channel {
     ws.on('pong', () => { (ws as any).__alive = true; });
     logger.info('Web client connected');
 
-    // Send message history (includes bot messages, reversed to chronological)
+    // Send message history merged with activity logs, in chronological order
     const messages = getRecentMessages(WEB_JID, 50).reverse();
+    const activityLogs = getActivityLogs(WEB_JID, 50).reverse();
+
+    const historyItems: Array<Record<string, unknown>> = [];
+    for (const m of messages) {
+      historyItems.push({
+        type: 'message',
+        sender: m.sender_name,
+        text: m.content,
+        timestamp: m.timestamp,
+        isFromMe: Boolean(m.is_from_me) || Boolean(m.is_bot_message),
+      });
+    }
+    for (const a of activityLogs) {
+      historyItems.push({
+        type: 'activity_log',
+        events: a.events,
+        timestamp: a.timestamp,
+      });
+    }
+    historyItems.sort((a, b) => (a.timestamp as string).localeCompare(b.timestamp as string));
+
     ws.send(
       JSON.stringify({
         type: 'history',
         group: WEB_GROUP_FOLDER,
-        messages: messages.map((m) => ({
-          sender: m.sender_name,
-          text: m.content,
-          timestamp: m.timestamp,
-          isFromMe: Boolean(m.is_from_me) || Boolean(m.is_bot_message),
-        })),
+        messages: historyItems,
       }),
     );
 
