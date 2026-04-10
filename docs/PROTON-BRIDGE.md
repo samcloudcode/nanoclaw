@@ -92,11 +92,52 @@ export PATH=~/bin:$PATH DISPLAY=:1
 protonmail-bridge
 ```
 
+## Re-authentication (expired token / 401 errors)
+
+When Bridge logs show `Invalid access token (Code=401)` or IMAP login fails with "no such user", the Proton session has expired and needs re-authentication.
+
+**Important:** The CLI (`--cli`) won't work from a plain SSH session because it can't reach gnome-keyring. You must use the CLI from the server directly or set `DBUS_SESSION_BUS_ADDRESS`.
+
+1. Stop the service:
+   ```bash
+   systemctl --user stop proton-bridge
+   ```
+
+2. Kill any leftover processes and clear lock files:
+   ```bash
+   pkill -x bridge-gui; pkill -x bridge
+   rm -f ~/.cache/protonmail/bridge-v3/bridge*.lock
+   ```
+
+3. Launch the CLI:
+   ```bash
+   export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus
+   /usr/lib/protonmail/bridge/bridge --cli
+   ```
+   It should sync automatically if the refresh token is still valid. If not, use `login` at the `>>>` prompt.
+
+4. Check the IMAP/SMTP password — it often changes after re-auth:
+   ```
+   >>> info
+   ```
+   If the password changed, update `PROTON_BRIDGE_PASSWORD` in `.env` (locally and on server):
+   ```bash
+   scp .env nanoclaw:~/nanoclaw/.env
+   ssh nanoclaw 'systemctl --user restart nanoclaw'
+   ```
+
+5. Exit the CLI and restart the service:
+   ```bash
+   systemctl --user start proton-bridge
+   ```
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | `Could not load the Qt platform plugin "xcb"` | Missing xcb libraries | Install Qt dependencies above |
 | `Failed to add test credentials to keychain` / `Object does not exist at path "/org/freedesktop/secrets/collection/login"` | No "login" keyring collection | Follow keyring setup above |
+| `Failed to add test credentials to keychain` / `timed out after 10s` | CLI can't reach gnome-keyring | Set `DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus` before running |
 | `another instance is already running` | Stale lock file | `pkill -x bridge-gui; pkill -x bridge; rm -f ~/.cache/protonmail/bridge-v3/bridge*.lock` |
 | `Couldn't find a suitable web browser` / `is not a snap cgroup` | Snap browsers don't work in VNC | Install epiphany and use the xdg-open wrapper (see Browser section above) |
+| `Invalid access token (Code=401)` / IMAP "no such user" | Proton session expired | Follow re-authentication steps above |

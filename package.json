@@ -19,7 +19,6 @@
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "better-sqlite3": "^11.8.1",
     "cron-parser": "^5.5.0",
-    "grammy": "^1.40.0",
     "link-preview-js": "^3.2.0",
     "openai": "^4.77.0",
     "pino": "^9.6.0",

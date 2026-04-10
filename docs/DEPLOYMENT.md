@@ -59,13 +59,6 @@ ssh nanoclaw 'journalctl --user -u nanoclaw -f'    # Tail logs
 | `~/.config/systemd/user/nanoclaw.service` | NanoClaw systemd unit |
 | `~/.config/systemd/user/vncserver.service` | VNC systemd unit |
 
-### Telegram
-
-- Prod bot: `@samassistant_prod_bot`
-- Registered chat: `tg:2088640248` (DM)
-- `TELEGRAM_ONLY=true`, `TELEGRAM_ALLOWED_USERS=2088640248`
-- Local dev uses a separate bot token to avoid polling conflicts
-
 ## Deploy Updates
 
 ### Code changes
@@ -111,15 +104,12 @@ scp .transcription.config.json nanoclaw:~/nanoclaw/.transcription.config.json
 ### Monitoring
 
 - DigitalOcean alerts: CPU > 90%, disk > 80%, memory > 90%
-- Dead man's switch: scheduled task pings via Telegram daily (not yet set up)
+- Dead man's switch: scheduled task pings daily (not yet set up)
 
 ## Gotchas
 
 ### `.npmrc` with `legacy-peer-deps=true`
-Required due to zod peer dependency conflict between grammy and openai. Without it, `npm ci` silently skips packages. Committed to repo.
-
-### Telegram JID format is `tg:<user_id>`
-When registering a chat, the JID must be prefixed with `tg:`. Example: `tg:2088640248`, not `2088640248`.
+Required due to zod peer dependency conflict. Without it, `npm ci` silently skips packages. Committed to repo.
 
 ### `.transcription.config.json` is not in git
 Contains the OpenAI API key for voice transcription. Must be copied to server manually.
@@ -136,27 +126,6 @@ xrdp + XFCE on Ubuntu 24.04 doesn't work reliably (black/turquoise screen). Tige
 ### Service restart waits for running containers
 `systemctl --user restart nanoclaw` sends SIGTERM, but NanoClaw waits for running agent containers to detach. If it hangs: `docker kill $(docker ps -q --filter "name=nanoclaw-")`
 
-### Dev vs prod bot tokens
-Local `.env` uses a dev Telegram bot token, server uses prod. Never run both with the same token — only one can poll Telegram at a time.
-
-## Voice Hotkey (Local Machine)
-
-The voice hotkey (`scripts/voice-hotkey.sh`) sends audio to the server via an SSH tunnel.
-
-**Local services (systemd user on laptop):**
-
-| Service | Purpose |
-|---------|---------|
-| `nanoclaw-tunnel` | autossh persistent SSH tunnel forwarding port 8765 |
-
-```bash
-systemctl --user status nanoclaw-tunnel   # Check tunnel
-journalctl --user -u nanoclaw-tunnel -f   # Tunnel logs
-```
-
-The tunnel uses the `nanoclaw` SSH config alias (`LocalForward 8765 localhost:8765`). It starts on login, reconnects on drops, and restarts via systemd if the process dies.
-
-The hotkey script defaults to `http://localhost:8765` which routes through the tunnel to the server's voice endpoint.
 
 ## Future
 

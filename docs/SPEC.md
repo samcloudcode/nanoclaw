@@ -1,6 +1,6 @@
 # NanoClaw Specification
 
-A personal Claude assistant accessible via WhatsApp, with persistent memory per conversation, scheduled tasks, and email integration.
+A personal Claude assistant with a web interface, persistent memory per conversation, scheduled tasks, and email integration. WhatsApp runs as a background data service for message querying.
 
 ---
 
@@ -28,10 +28,11 @@ A personal Claude assistant accessible via WhatsApp, with persistent memory per 
 │                   (Main Node.js Process)                             │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                      │
-│  ┌──────────────┐                     ┌────────────────────┐        │
-│  │  WhatsApp    │────────────────────▶│   SQLite Database  │        │
-│  │  (baileys)   │◀────────────────────│   (messages.db)    │        │
-│  └──────────────┘   store/send        └─────────┬──────────┘        │
+│  ┌──────────────┐  ┌──────────────┐    ┌────────────────────┐        │
+│  │  Web Channel │  │  WhatsApp    │───▶│   SQLite Database  │        │
+│  │  (HTTP+WS)   │  │  (baileys)   │    │   (messages.db)    │        │
+│  └──────┬───────┘  └──────────────┘    └─────────┬──────────┘        │
+│         │           (data service)               │                   │
 │                                                  │                   │
 │         ┌────────────────────────────────────────┘                   │
 │         │                                                            │
@@ -73,7 +74,8 @@ A personal Claude assistant accessible via WhatsApp, with persistent memory per 
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
-| WhatsApp Connection | Node.js (@whiskeysockets/baileys) | Connect to WhatsApp, send/receive messages |
+| Web Channel | Node.js (ws) | Primary interactive channel via HTTP + WebSocket |
+| WhatsApp Service | Node.js (@whiskeysockets/baileys) | Background data service: store messages, sync groups, fetch history |
 | Message Storage | SQLite (better-sqlite3) | Store messages for polling |
 | Container Runtime | Apple Container | Isolated Linux VMs for agent execution |
 | Agent | @anthropic-ai/claude-agent-sdk (0.2.29) | Run Claude with tools and MCP servers |
@@ -100,7 +102,8 @@ nanoclaw/
 ├── src/
 │   ├── index.ts                   # Orchestrator: state, message loop, agent invocation
 │   ├── channels/
-│   │   └── whatsapp.ts            # WhatsApp connection, auth, send/receive
+│   │   └── web.ts                 # Web channel: HTTP + WebSocket, primary UI
+│   ├── whatsapp-service.ts        # Background WhatsApp data service
 │   ├── ipc.ts                     # IPC watcher and task processing
 │   ├── router.ts                  # Message formatting and outbound routing
 │   ├── config.ts                  # Configuration constants

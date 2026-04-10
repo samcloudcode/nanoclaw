@@ -13,7 +13,7 @@
 
 ### 1. Container Isolation (Primary Boundary)
 
-Agents execute in Apple Container (lightweight Linux VMs), providing:
+Agents execute in Docker containers, providing:
 - **Process isolation** - Container processes cannot affect the host
 - **Filesystem isolation** - Only explicitly mounted directories are visible
 - **Non-root execution** - Runs as unprivileged `node` user (uid 1000)
@@ -94,7 +94,7 @@ const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │                        UNTRUSTED ZONE                             │
-│  WhatsApp Messages (potentially malicious)                        │
+│  Inbound messages (web, WhatsApp — potentially malicious)         │
 └────────────────────────────────┬─────────────────────────────────┘
                                  │
                                  ▼ Trigger check, input escaping

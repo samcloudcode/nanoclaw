@@ -8,14 +8,11 @@ import {
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
-  TELEGRAM_BOT_TOKEN,
-  TELEGRAM_ONLY,
   TRIGGER_PATTERN,
   WEB_AUTH_TOKEN,
 } from './config.js';
-import { TelegramChannel } from './channels/telegram.js';
 import { WebChannel } from './channels/web.js';
-import { WhatsAppChannel } from './channels/whatsapp.js';
+import { WhatsAppService } from './whatsapp-service.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -42,7 +39,6 @@ import { assertValidGroupFolder } from './group-folder.js';
 import { GroupQueue } from './group-queue.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
-import { startVoiceServer } from './voice-server.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { ActivityEvent, Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -56,7 +52,7 @@ let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
-let whatsapp: WhatsAppChannel;
+let whatsappService: WhatsAppService | undefined;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
@@ -133,7 +129,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const channel = findChannel(channels, chatJid);
   if (!channel) {
-    console.log(`Warning: no channel owns JID ${chatJid}, skipping messages`);
+    logger.debug({ chatJid }, 'No channel owns JID, skipping');
     return true;
   }
 
@@ -337,9 +333,13 @@ async function startMessageLoop(): Promise<void> {
 
   logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
 
+  // Only poll for JIDs that have a matching channel (avoids wasting cycles on WhatsApp JIDs)
+  const getActiveJids = () =>
+    Object.keys(registeredGroups).filter((jid) => findChannel(channels, jid));
+
   while (true) {
     try {
-      const jids = Object.keys(registeredGroups);
+      const jids = getActiveJids();
       const { messages, newTimestamp } = getNewMessages(jids, lastTimestamp, ASSISTANT_NAME);
 
       if (messages.length > 0) {
@@ -365,10 +365,7 @@ async function startMessageLoop(): Promise<void> {
           if (!group) continue;
 
           const channel = findChannel(channels, chatJid);
-          if (!channel) {
-            console.log(`Warning: no channel owns JID ${chatJid}, skipping messages`);
-            continue;
-          }
+          if (!channel) continue;
 
           const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
           const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
@@ -425,6 +422,9 @@ async function startMessageLoop(): Promise<void> {
  */
 function recoverPendingMessages(): void {
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
+    // Only recover for groups with a matching channel
+    if (!findChannel(channels, chatJid)) continue;
+
     const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
     const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
     if (pending.length > 0) {
@@ -481,52 +481,47 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   loadState();
 
+  if (!WEB_AUTH_TOKEN) {
+    throw new Error('WEB_AUTH_TOKEN is required. Set it in .env to enable the web channel.');
+  }
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
+    await whatsappService?.disconnect();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
-  // Channel callbacks (shared by all channels)
-  const channelOpts = {
+  // Shared callbacks for message/metadata storage
+  const dataOpts = {
     onMessage: (_chatJid: string, msg: NewMessage) => storeMessage(msg),
     onChatMetadata: (chatJid: string, timestamp: string, name?: string, channel?: string, isGroup?: boolean) =>
       storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
     registeredGroups: () => registeredGroups,
   };
 
-  // Create and connect channels concurrently so one doesn't block the other
-  const connectPromises: Promise<void>[] = [];
+  // Start WhatsApp as a background data service (not a channel)
+  whatsappService = new WhatsAppService(dataOpts);
 
-  if (!TELEGRAM_ONLY) {
-    whatsapp = new WhatsAppChannel(channelOpts);
-    channels.push(whatsapp);
-    connectPromises.push(whatsapp.connect());
-  }
+  // Start web channel (primary interactive channel)
+  const web = new WebChannel(WEB_AUTH_TOKEN, {
+    ...dataOpts,
+    queue,
+    registerGroup,
+  });
+  channels.push(web);
 
-  if (TELEGRAM_BOT_TOKEN) {
-    const telegram = new TelegramChannel(TELEGRAM_BOT_TOKEN, channelOpts);
-    channels.push(telegram);
-    connectPromises.push(telegram.connect());
-  }
+  // Connect both concurrently
+  await Promise.all([
+    whatsappService.connect(),
+    web.connect(),
+  ]);
 
-  if (WEB_AUTH_TOKEN) {
-    const web = new WebChannel(WEB_AUTH_TOKEN, {
-      ...channelOpts,
-      queue,
-      registerGroup,
-    });
-    channels.push(web);
-    connectPromises.push(web.connect());
-  }
-
-  await Promise.all(connectPromises);
-
-  // Start subsystems (independently of connection handler)
+  // Start subsystems
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
     getSessions: () => sessions,
@@ -535,7 +530,7 @@ async function main(): Promise<void> {
     sendMessage: async (jid, rawText) => {
       const channel = findChannel(channels, jid);
       if (!channel) {
-        console.log(`Warning: no channel owns JID ${jid}, cannot send message`);
+        logger.warn({ jid }, 'No channel owns JID, cannot send scheduled message');
         return;
       }
       const text = formatOutbound(rawText);
@@ -550,12 +545,12 @@ async function main(): Promise<void> {
     },
     registeredGroups: () => registeredGroups,
     registerGroup,
-    syncGroupMetadata: (force) => whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
+    syncGroupMetadata: (force) => whatsappService?.syncGroupMetadata(force) ?? Promise.resolve(),
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
-    fetchOlderHistory: whatsapp
+    fetchOlderHistory: whatsappService
       ? async (jid, anchorMsgId, anchorFromMe, anchorTimestampMs, count) => {
-          const waMessages = await whatsapp.fetchOlderHistory(jid, anchorMsgId, anchorFromMe, anchorTimestampMs, count);
+          const waMessages = await whatsappService!.fetchOlderHistory(jid, anchorMsgId, anchorFromMe, anchorTimestampMs, count);
 
           // Convert WAMessage to simple format and store in DB
           const results: Array<{ id: string; content: string; sender_name: string; timestamp: string; is_from_me: boolean }> = [];
@@ -588,11 +583,6 @@ async function main(): Promise<void> {
           return results;
         }
       : undefined,
-  });
-  startVoiceServer({
-    channels,
-    queue,
-    registeredGroups: () => registeredGroups,
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();

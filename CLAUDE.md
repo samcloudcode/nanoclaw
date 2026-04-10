@@ -4,21 +4,21 @@ Personal Claude assistant. See [README.md](README.md) for philosophy and setup. 
 
 ## Quick Context
 
-Runs on **Linux (Fedora)**. Single Node.js process that connects to WhatsApp, routes messages to Claude Agent SDK running in Docker containers. Each group has isolated filesystem and memory.
+Runs on **Linux (Fedora)**. Single Node.js process with a web interface as the primary channel, routing messages to Claude Agent SDK running in Docker containers. WhatsApp runs as a background data service for message querying. Each group has isolated filesystem and memory.
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
 | `src/index.ts` | Orchestrator: state, message loop, agent invocation |
-| `src/channels/whatsapp.ts` | WhatsApp connection, auth, send/receive |
+| `src/channels/web.ts` | Web channel: HTTP + WebSocket, primary UI |
+| `src/whatsapp-service.ts` | Background WhatsApp data service (message storage, group sync, history fetch) |
 | `src/ipc.ts` | IPC watcher and task processing |
 | `src/router.ts` | Message formatting and outbound routing |
 | `src/config.ts` | Trigger pattern, paths, intervals |
 | `src/container-runner.ts` | Spawns agent containers with mounts |
 | `src/task-scheduler.ts` | Runs scheduled tasks |
 | `src/db.ts` | SQLite operations (messages, chats, tasks) |
-| `src/voice-server.ts` | HTTP endpoint for voice hotkey input |
 | `groups/{name}/CLAUDE.md` | Per-group memory (overlay from vault) |
 
 ## Agent Skills & Vault Sync
@@ -83,17 +83,16 @@ journalctl --user -u nanoclaw -f     # Tail logs
 
 ## Troubleshooting WhatsApp
 
-If WhatsApp isn't connecting, check these in order:
+WhatsApp runs as a background data service (not a channel). If it isn't connecting:
 
-1. **`TELEGRAM_ONLY=true` in `.env`** — disables WhatsApp entirely. Set to `false` and restart.
-2. **Auth expired (401 / "logged out")** — clear auth and re-scan QR:
+1. **Auth expired (401 / "logged out")** — clear auth and re-scan QR:
    ```bash
    ssh nanoclaw 'rm -rf ~/nanoclaw/store/auth && mkdir -p ~/nanoclaw/store/auth'
    ssh nanoclaw 'cd ~/nanoclaw && node wa-auth.mjs'  # shows QR in terminal
    # Scan with WhatsApp → Settings → Linked Devices → Link a Device
    systemctl --user restart nanoclaw
    ```
-   The `wa-auth.mjs` script on the server handles QR display and reconnection. Baileys' `printQRInTerminal` option is deprecated and no longer works.
+   The `wa-auth.mjs` script on the server handles QR display and reconnection. WhatsApp auth issues won't affect the web channel — it keeps running independently.
 
 ## Container Secrets & Environment
 

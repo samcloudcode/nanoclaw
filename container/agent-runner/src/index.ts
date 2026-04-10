@@ -704,7 +704,7 @@ async function main(): Promise<void> {
   // Secrets never touch process.env itself, so Bash subprocesses can't see them.
   // Exception: tool-facing vars (DATABASE_URL, USER_ID) go into process.env
   // so Bash subprocesses (e.g. psql) can access them.
-  const TOOL_ENV_KEYS = ['DATABASE_URL', 'USER_ID'];
+  const TOOL_ENV_KEYS = ['DATABASE_URL', 'USER_ID', 'DROPBOX_REFRESH_TOKEN', 'DROPBOX_APP_KEY', 'DROPBOX_APP_SECRET'];
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
   for (const [key, value] of Object.entries(containerInput.secrets || {})) {
     sdkEnv[key] = value;

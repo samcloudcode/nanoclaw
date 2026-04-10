@@ -1,6 +1,6 @@
 ---
 name: customize
-description: Add new capabilities or modify NanoClaw behavior. Use when user wants to add channels (Telegram, Slack, email input), change triggers, add integrations, modify the router, or make any other customizations. This is an interactive skill that asks questions to understand what the user wants.
+description: Add new capabilities or modify NanoClaw behavior. Use when user wants to add channels (Slack, email input, etc.), change triggers, add integrations, modify the router, or make any other customizations. This is an interactive skill that asks questions to understand what the user wants.
 ---
 
 # NanoClaw Customization
@@ -19,7 +19,8 @@ This skill helps users add capabilities or modify behavior. Use AskUserQuestion 
 | File | Purpose |
 |------|---------|
 | `src/index.ts` | Orchestrator: state, message loop, agent invocation |
-| `src/channels/whatsapp.ts` | WhatsApp connection, auth, send/receive |
+| `src/channels/web.ts` | Web channel: HTTP + WebSocket, primary UI |
+| `src/whatsapp-service.ts` | Background WhatsApp data service (not a channel) |
 | `src/ipc.ts` | IPC watcher and task processing |
 | `src/router.ts` | Message formatting and outbound routing |
 | `src/types.ts` | TypeScript interfaces (includes Channel) |
@@ -39,7 +40,7 @@ Questions to ask:
 - Should messages from this channel go to existing groups or new ones?
 
 Implementation pattern:
-1. Create `src/channels/{name}.ts` implementing the `Channel` interface from `src/types.ts` (see `src/channels/whatsapp.ts` for reference)
+1. Create `src/channels/{name}.ts` implementing the `Channel` interface from `src/types.ts` (see `src/channels/web.ts` for reference)
 2. Add the channel instance to `main()` in `src/index.ts` and wire callbacks (`onMessage`, `onChatMetadata`)
 3. Messages are stored via the `onMessage` callback; routing is automatic via `ownsJid()`
 
@@ -92,8 +93,7 @@ Always tell the user:
 ```bash
 # Rebuild and restart
 npm run build
-launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
-launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
+systemctl --user restart nanoclaw
 ```
 
 ## Example Interaction
@@ -102,6 +102,6 @@ User: "Add Telegram as an input channel"
 
 1. Ask: "Should Telegram use the same @Andy trigger, or a different one?"
 2. Ask: "Should Telegram messages create separate conversation contexts, or share with WhatsApp groups?"
-3. Create `src/channels/telegram.ts` implementing the `Channel` interface (see `src/channels/whatsapp.ts`)
+3. Create `src/channels/telegram.ts` implementing the `Channel` interface (see `src/channels/web.ts`)
 4. Add the channel to `main()` in `src/index.ts`
 5. Tell user how to authenticate and test

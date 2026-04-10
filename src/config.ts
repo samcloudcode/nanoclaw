@@ -8,21 +8,12 @@ import { readEnvFile } from './env.js';
 // where needed (container-runner.ts) to avoid leaking to child processes.
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
-  'ASSISTANT_HAS_OWN_NUMBER',
-  'TELEGRAM_BOT_TOKEN',
-  'TELEGRAM_ONLY',
-  'TELEGRAM_ALLOWED_USERS',
-  'VOICE_CHAT_JID',
-  'VOICE_SENDER_NAME',
-  'VOICE_ENDPOINT_PORT',
   'WEB_PORT',
   'WEB_AUTH_TOKEN',
 ]);
 
 export const ASSISTANT_NAME =
   process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
-export const ASSISTANT_HAS_OWN_NUMBER =
-  (process.env.ASSISTANT_HAS_OWN_NUMBER || envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
@@ -84,25 +75,6 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
-
-// Telegram configuration
-export const TELEGRAM_BOT_TOKEN =
-  process.env.TELEGRAM_BOT_TOKEN || envConfig.TELEGRAM_BOT_TOKEN || '';
-export const TELEGRAM_ONLY =
-  (process.env.TELEGRAM_ONLY || envConfig.TELEGRAM_ONLY) === 'true';
-export const TELEGRAM_ALLOWED_USERS: number[] = (
-  process.env.TELEGRAM_ALLOWED_USERS || envConfig.TELEGRAM_ALLOWED_USERS || ''
-).split(',').filter(Boolean).map(Number);
-
-// Voice endpoint configuration
-export const VOICE_CHAT_JID =
-  process.env.VOICE_CHAT_JID || envConfig.VOICE_CHAT_JID || '';
-export const VOICE_SENDER_NAME =
-  process.env.VOICE_SENDER_NAME || envConfig.VOICE_SENDER_NAME || 'Voice';
-export const VOICE_ENDPOINT_PORT = parseInt(
-  process.env.VOICE_ENDPOINT_PORT || envConfig.VOICE_ENDPOINT_PORT || '8765',
-  10,
-);
 
 // Web channel configuration
 export const WEB_PORT = parseInt(
